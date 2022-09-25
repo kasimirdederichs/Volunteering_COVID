@@ -1,0 +1,1707 @@
+# Title:      Volunteering in the United Kingdom during the COVID-19 pandemic - Who started and who quit?:
+# Author:     Kasimir Dederichs, Nuffield College - University of Oxford
+# Journal:    Nonprofit and Voluntary Sector Quarterly
+# Data:       Understanding Society, University of Essex Institute for Social and Economic Research, 
+#             NatCen Social Research, & Kantar Public. (2021). Understanding Society: 
+#             Waves 1-10 2009-2010 and COVID-19 study, 2021 [data collection]. 13th Edition. UK Data Service.
+
+# 0. CONTENTS OF THE SCRIPT ####
+# 1.   Working Directory and Libraries
+# 2.   Compiling the dataset:
+# 2.1. 2011 data
+# 2.2. 2013 data
+# 2.3. 2015 data
+# 2.4. 2017 data
+# 2.5. 2019 data
+# 2.6. 2020 data
+# 2.7. 2021 data
+# 2.8. Merge
+# 3.   Generate combined variables over the years
+# 4.   Reshape to long-format
+# 5.   Final Sample
+# 6.   Figure
+# 6.1. Figure 1
+# 6.2. Figure 2
+# 7.   Linear Probability models
+# 8.   Appendices
+# 8.1. Appendix A1: Social distancing rules during the period of observation (see paper)
+# 8.2. Appendix A2: Example volunteering trajectory of one individual
+# 8.3. Appendix A3: Descriptive Statistics across waves
+# 8.4. Appendix A4: Share of volunteers across months
+# 8.5. Appendix A5: Attrition and volunteering
+# 9.   Additional Analyses
+# 9.1. 9.1. Balanced sample
+# 9.2. Covid volunteering in 2021
+# 9.3. Analyses with full time period outcome
+# 10.  End
+
+#  1.   Working Directory and Libraries ####
+setwd("")
+#start log file:
+#sink(file = "script/covid.log", split = TRUE)
+
+# Libraries
+library(haven)
+library(dplyr)
+library(patchwork) 
+library(survey) 
+library(fixest)
+library(plyr)
+library(plm)
+library(forcats)
+library(foreign)
+library(Hmisc) 
+library(tidyverse)
+library(reshape2) 
+library(car) 
+library(survey) 
+library(lubridate)
+library(tidyr)
+library(ggpubr)
+library(stargazer) 
+library(cowplot) 
+library(tableone) 
+library(miceadds) 
+
+#  2.   Compiling the dataset ####
+## 2.1. 2011 data ####
+dat11 <- read_dta("data/Stata/UKDA-6614-stata/stata/stata11_se/ukhls_w2/b_indresp.dta")
+
+dat11 %>%
+  select(pidp, b_strata, b_psu, b_birthy, b_volun, b_country, b_qfhigh_dv, b_scsf1,
+         b_volhrs, b_istrtdaty, b_istrtdatm, b_istrtdatd, b_indinus_xw, b_psu, b_sex,
+         b_qualnew1, b_qualnew2, b_qualnew3, b_qualnew4, b_qualnew5, b_qualnew6, 
+         b_qualnew7, b_qualnew8, b_qualnew9, b_qualnew10, b_qualnew11, 
+         b_qualnew13, b_qualnew15, b_qualnew16) -> dat11
+
+dat11 <- dat11 %>%
+  mutate(doi.11=make_date(b_istrtdaty, b_istrtdatm, b_istrtdatd))
+
+dat11$month.11 <- dat11$b_istrtdatm
+dat11$month.11[dat11$month.11<0] <- NA
+
+#countries:
+dat11$b_country[dat11$b_country==-9] <- NA
+dat11$country.11 <- as.factor(dat11$b_country)
+table(dat11$country.11)        
+#1=England, 2=Wales, 3=Scotland, 4=Northern Ireland
+
+dat11$psu.11 <- dat11$b_psu
+dat11$weights.11 <- dat11$b_indinus_xw
+
+dat11$year.11 <- 2011
+
+#volunteering in last 12 months:
+dat11$volunt.11 <- factor(recode(dat11$b_volun, "-9=NA; -7=NA; -2=NA; 
+                         -1=NA; 1=1; 2=0"), 
+                          labels =c("No", "Yes")) 
+dat11$volunt.11[dat11$b_volhrs==0] <- "No"
+label(dat11$volunt.11) <- "Volunteered in last 4 weeks"
+
+#hours volunteered in last 4 weeks:
+dat11$volhrs.11 <- dat11$b_volhrs
+dat11$volhrs.11[dat11$volhrs.11==-8] <- 0
+dat11$volhrs.11[dat11$volhrs.11==-10] <- NA
+dat11$volhrs.11[dat11$volhrs.11==-7] <- NA
+dat11$volhrs.11[dat11$volhrs.11==-2] <- NA
+dat11$volhrs.11[dat11$volhrs.11==-1] <- NA
+
+#main dependent variable: volunteering in last 4 weeks
+dat11 <- dat11 %>%
+  mutate(volu4weeks.11 = case_when(b_volhrs>0 ~ 1,
+                                   b_volhrs<=0 & b_volun>0 ~ 0))
+
+#strata:
+dat11$strata.11 <- dat11$b_strata
+dat11 = subset(dat11, select = -c(b_strata))
+
+#health:
+dat11$health.11 <- factor(recode(dat11$b_scsf1, "-9=NA; -8=NA; -7=NA; -2=NA; 
+                          -1=NA; 5=0; 4=1; 3=2; 2=3; 1=4"),
+                          labels= c("Poor", "Fair", "Good", 
+                                    "Very Good", "Excellent"))
+label(dat11$health.11) <- "Health"
+dat11$health_n.11 <- as.numeric(dat11$health.11)
+dat11$health_n.11 <- dat11$health_n.11 - 1 #health numeric (0 poor -- 4 excellent)
+
+#sex:
+dat11$female.11 <- NA
+dat11$female.11[dat11$b_sex==1] <-0
+dat11$female.11[dat11$b_sex==2] <-1
+
+dat11$educ.11 <- factor(recode(dat11$b_qfhigh_dv, "-9=NA; -8=NA; 1=3; 2=3; 3=3; 
+                           4=3; 5=3; 6=3; 7=2; 8=2; 9=2; 10=1; 11=3; 12=2; 
+                           13=1; 14=1; 15=1; 16=1; 96=0"),
+                        labels= c("No degree", "GCSE", "A-levels", 
+                                  "Higher Education"))
+label(dat11$educ.11) <- "Highest education"
+
+dat11$educ3.11 <- factor(recode(dat11$educ.11, "-9=NA; -8=NA; 1=3; 2=3; 3=3;
+                                4=3; 5=3; 6=2; 7=2; 8=2; 9=2; 10=2; 11=2; 12=1;
+                                13=1; 14=1; 15=1; 16=1; 96=1"))
+label(dat11$educ3.11) <- "Education"
+
+#age:
+dat11$age.11 <- NA
+dat11$age.11 <- 2017-dat11$b_birthy
+dat11$age.11[dat11$b_birthy<0] <- NA #replace all missings!
+label(dat11$age.11) <- "Age in years"
+
+
+## 2.2. 2013 data ####
+dat13 <- read_dta("data/Stata/UKDA-6614-stata/stata/stata11_se/ukhls_w4/d_indresp.dta")
+
+dat13 %>%
+  select(pidp, d_strata, d_psu, d_birthy, d_volun, d_country, d_qfhigh_dv, d_scsf1,
+         d_volhrs, d_sex, d_istrtdaty, d_istrtdatm, d_istrtdatd, d_psu, d_indinub_xw, d_nchresp) -> dat13
+
+dat13 <- dat13 %>%
+  mutate(doi.13=make_date(d_istrtdaty, d_istrtdatm, d_istrtdatd))
+
+dat13$month.13 <- dat13$d_istrtdatm
+dat13$month.13[dat13$month.13<0] <- NA
+
+#countries:
+dat13$d_country[dat13$d_country==-9] <- NA
+dat13$country.13 <- as.factor(dat13$d_country)
+table(dat13$country.13)        
+#1=England, 2=Wales, 3=Scotland, 4=Northern Ireland
+
+dat13$psu.13 <- dat13$d_psu
+dat13$weights.13 <- dat13$d_indinub_xw
+
+
+dat13$year.13 <- 2013
+
+#volunteering in last 12 months:
+dat13$volunt.13 <- factor(recode(dat13$d_volun, "-9=NA; -7=NA; -2=NA; 
+                         -1=NA; 1=1; 2=0"), 
+                          labels =c("No", "Yes")) 
+dat13$volunt.13[dat13$d_volhrs==0] <- "No"
+label(dat13$volunt.13) <- "Volunteered in last 4 weeks"
+
+#hours volunteered in last 4 weeks:
+dat13$volhrs.13 <- dat13$d_volhrs
+dat13$volhrs.13[dat13$volhrs.13==-8] <- 0
+dat13$volhrs.13[dat13$volhrs.13==-10] <- NA
+dat13$volhrs.13[dat13$volhrs.13==-7] <- NA
+dat13$volhrs.13[dat13$volhrs.13==-2] <- NA
+dat13$volhrs.13[dat13$volhrs.13==-1] <- NA
+
+#main dependent variable: volunteering in last 4 weeks
+dat13 <- dat13 %>%
+  mutate(volu4weeks.13 = case_when(d_volhrs>0 ~ 1,
+                                   d_volhrs<=0 & d_volun>0 ~ 0))
+
+#strata:
+dat13$strata.13 <- dat13$d_strata
+dat13 = subset(dat13, select = -c(d_strata))
+
+#health:
+dat13$health.13 <- factor(recode(dat13$d_scsf1, "-9=NA; -8=NA; -7=NA; -2=NA; 
+                          -1=NA; 5=0; 4=1; 3=2; 2=3; 1=4"),
+                          labels= c("Poor", "Fair", "Good", 
+                                    "Very Good", "Excellent"))
+label(dat13$health.13) <- "Health"
+dat13$health_n.13 <- as.numeric(dat13$health.13)
+dat13$health_n.13 <- dat13$health_n.13 - 1 #health numeric (0 poor -- 4 excellent)
+
+#sex:
+dat13$female.13 <- NA
+dat13$female.13[dat13$d_sex==1] <-0
+dat13$female.13[dat13$d_sex==2] <-1
+
+#education:
+dat13$educ.13 <- factor(recode(dat13$d_qfhigh_dv, "-9=NA; -8=NA; -2=NA; -1=NA; 1=3; 2=3; 3=3; 
+                           4=3; 5=3; 6=3; 7=2; 8=2; 9=2; 10=1; 11=3; 12=2; 
+                           13=1; 14=1; 15=1; 16=1; 96=0"),
+                        labels= c("No degree", "GCSE", "A-levels", 
+                                  "Higher Education"))
+label(dat13$educ.13) <- "Highest education"
+
+dat13$educ3.13 <- factor(recode(dat13$d_qfhigh_dv, "-9=NA; -8=NA; -2=NA; 1=3; 2=3; 3=3;
+                                4=3; 5=3; 6=2; 7=2; 8=2; 9=2; 10=2; 11=2; 12=1;
+                                13=1; 14=1; 15=1; 16=1; 96=1"))
+label(dat13$educ3.13) <- "Education"
+
+#age:
+dat13$age.13 <- NA
+dat13$age.13 <- 2017-dat13$d_birthy
+dat13$age.13[dat13$d_birthy<0] <- NA #replace all missings!
+label(dat13$age.13) <- "Age in years"
+
+#children under 16 years:
+dat13$children.13 <- case_when(dat13$d_nchresp>0 & !is.na(dat13$d_nchresp) ~ 1, 
+                               dat13$d_nchresp==0 & !is.na(dat13$d_nchresp) ~ 0)
+
+## 2.3. 2015 data ####
+dat15 <- read_dta("data/Stata/UKDA-6614-stata/stata/stata11_se/ukhls_w6/f_indresp.dta")
+
+dat15 %>%
+  select(pidp, f_strata, f_psu, f_birthy, f_volun, f_country, f_qfhigh_dv, f_scsf1, f_sex,
+         f_volhrs, f_istrtdaty, f_istrtdatm, f_istrtdatd, f_psu, f_indinub_xw, f_nchresp) -> dat15
+
+dat15 <- dat15 %>%
+  mutate(doi.15=make_date(f_istrtdaty, f_istrtdatm, f_istrtdatd))
+
+dat15$month.15 <- dat15$f_istrtdatm
+dat15$month.15[dat15$month.15<0] <- NA
+table(dat15$month.15)
+
+#countries:
+dat15$f_country[dat15$f_country==-9] <- NA
+dat15$country.15 <- as.factor(dat15$f_country)
+table(dat15$country.15)        
+#1=England, 2=Wales, 3=Scotland, 4=Northern Ireland
+
+dat15$psu.15 <- dat15$f_psu
+dat15$weights.15 <- dat15$f_indinub_xw
+
+dat15$year.15 <- 2015
+
+#volunteering in last 4 weeks:
+dat15$volunt.15 <- factor(recode(dat15$f_volun, "-10=NA; -7=NA; -2=NA; 
+                         -1=NA; 1=1; 2=0"), 
+                          labels =c("No", "Yes")) 
+dat15$volunt.15[dat15$f_volhrs==0] <- "No"
+label(dat15$volunt.15) <- "Volunteered in last 4 weeks"
+
+#hours volunteered in last 4 weeks:
+dat15$volhrs.15 <- dat15$f_volhrs
+dat15$volhrs.15[dat15$volhrs.15==-8] <- 0
+dat15$volhrs.15[dat15$volhrs.15==-10] <- NA
+dat15$volhrs.15[dat15$volhrs.15==-7] <- NA
+dat15$volhrs.15[dat15$volhrs.15==-2] <- NA
+dat15$volhrs.15[dat15$volhrs.15==-1] <- NA
+
+#main dependent variable: volunteering in last 4 weeks
+dat15 <- dat15 %>%
+  mutate(volu4weeks.15 = case_when(f_volhrs>0 ~ 1,
+                                   f_volhrs<=0 & f_volun>0 ~ 0))
+
+#strata:
+dat15$strata.15 <- dat15$f_strata
+dat15 = subset(dat15, select = -c(f_strata))
+
+#health:
+dat15$health.15 <- factor(recode(dat15$f_scsf1, "-11=NA; -10=NA; -9=NA; -8=NA; -7=NA; -2=NA; 
+                          -1=NA; 5=0; 4=1; 3=2; 2=3; 1=4"),
+                          labels= c("Poor", "Fair", "Good", 
+                                    "Very Good", "Excellent"))
+label(dat15$health.15) <- "Health"
+dat15$health_n.15 <- as.numeric(dat15$health.15)
+dat15$health_n.15 <- dat15$health_n.15 - 1 #health numeric (0 poor -- 4 excellent)
+
+#sex:
+dat15$female.15 <- NA
+dat15$female.15[dat15$f_sex==1] <-0
+dat15$female.15[dat15$f_sex==2] <-1
+
+#education:
+dat15$educ.15 <- factor(recode(dat15$f_qfhigh_dv, "-9=NA; -8=NA; -2=NA; -1=NA; 1=3; 2=3; 3=3; 
+                           4=3; 5=3; 6=3; 7=2; 8=2; 9=2; 10=1; 11=3; 12=2; 
+                           13=1; 14=1; 15=1; 16=1; 96=0"),
+                        labels= c("No degree", "GCSE", "A-levels", 
+                                  "Higher Education"))
+label(dat15$educ.15) <- "Highest education"
+
+dat15$educ3.15 <- factor(recode(dat15$f_qfhigh_dv, "-9=NA; -8=NA; -2=NA; -1=NA; 1=3; 2=3; 3=3;
+                                4=3; 5=3; 6=2; 7=2; 8=2; 9=2; 10=2; 11=2; 12=1;
+                                13=1; 14=1; 15=1; 16=1; 96=1"))
+label(dat15$educ3.15) <- "Education"
+
+#age:
+dat15$age.15 <- NA
+dat15$age.15 <- 2017-dat15$f_birthy
+dat15$age.15[dat15$f_birthy<0] <- NA #replace all missings!
+label(dat15$age.15) <- "Age in years"
+
+#children under 16 years:
+dat15$children.15 <- case_when(dat15$f_nchresp>0 & !is.na(dat15$f_nchresp) ~ 1, 
+                               dat15$f_nchresp==0 & !is.na(dat15$f_nchresp) ~ 0)
+
+## 2.4. 2017 data ####
+dat17 <- read_dta("data/Stata/UKDA-6614-stata/stata/stata11_se/ukhls_w8/h_indresp.dta")
+
+dat17 %>%
+  select(pidp, h_strata, h_psu, h_birthy, h_volun, h_country, h_qfhigh_dv,h_scsf1, h_sex,
+         h_volhrs, h_istrtdaty, h_istrtdatm, h_istrtdatd, h_psu, h_indinub_xw, h_nchresp) -> dat17
+
+dat17 <- dat17 %>%
+  mutate(doi.17=make_date(h_istrtdaty, h_istrtdatm, h_istrtdatd))
+
+dat17$month.17 <- dat17$h_istrtdatm
+dat17$month.17[dat17$month.17<0] <- NA
+table(dat17$month.17)
+
+#countries:
+dat17$h_country[dat17$h_country==-9] <- NA
+dat17$country.17 <- as.factor(dat17$h_country)
+table(dat17$country.17)        
+#1=England, 2=Wales, 3=Scotland, 4=Northern Ireland
+
+dat17$psu.17 <- dat17$h_psu
+dat17$weights.17 <- dat17$h_indinub_xw
+
+dat17$year.17 <- 2017
+
+#volunteering in last 4 weeks:
+dat17$volunt.17 <- factor(recode(dat17$h_volun, "-9=NA; -7=NA; -2=NA; 
+                         -1=NA; 1=1; 2=0"), 
+                         labels =c("No", "Yes")) 
+dat17$volunt.17[dat17$h_volhrs==0] <- "No"
+label(dat17$volunt.17) <- "Volunteered in last 4 weeks"
+
+#hours volunteered in last 4 weeks: 
+dat17$volhrs.17 <- dat17$h_volhrs
+dat17$volhrs.17[dat17$volhrs.17==-8] <- 0
+dat17$volhrs.17[dat17$volhrs.17==-7] <- NA
+dat17$volhrs.17[dat17$volhrs.17==-2] <- NA
+dat17$volhrs.17[dat17$volhrs.17==-1] <- NA
+
+#main dependent variable: volunteering in last 4 weeks
+dat17 <- dat17 %>%
+  mutate(volu4weeks.17 = case_when(h_volhrs>0 ~ 1,
+                                   h_volhrs<=0 & h_volun>0 ~ 0))
+
+#strata:
+dat17$strata.17 <- dat17$h_strata
+dat17 = subset(dat17, select = -c(h_strata))
+
+#health:
+dat17$health.17 <- factor(recode(dat17$h_scsf1, "-9=NA; -8=NA; -7=NA; -2=NA; 
+                          -1=NA; 5=0; 4=1; 3=2; 2=3; 1=4"),
+                         labels= c("Poor", "Fair", "Good", 
+                                   "Very Good", "Excellent"))
+label(dat17$health.17) <- "Health"
+dat17$health_n.17 <- as.numeric(dat17$health.17)
+dat17$health_n.17 <- dat17$health_n.17 - 1 #health numeric (0 poor -- 4 excellent)
+
+#sex:
+dat17$female.17 <- NA
+dat17$female.17[dat17$h_sex==1] <-0
+dat17$female.17[dat17$h_sex==2] <-1
+
+#education:
+dat17$educ.17 <- factor(recode(dat17$h_qfhigh_dv, "-9=NA; -8=NA; -2=NA; -1=NA; 1=3; 2=3; 3=3; 
+                           4=3; 5=3; 6=3; 7=2; 8=2; 9=2; 10=1; 11=3; 12=2; 
+                           13=1; 14=1; 15=1; 16=1; 96=0"),
+                       labels= c("No degree", "GCSE", "A-levels", 
+                                 "Higher Education"))
+label(dat17$educ.17) <- "Highest education"
+
+dat17$educ3.17 <- factor(recode(dat17$h_qfhigh_dv, "-9=NA; -8=NA; -2=NA; -1=NA; 1=3; 2=3; 3=3;
+                                4=3; 5=3; 6=2; 7=2; 8=2; 9=2; 10=2; 11=2; 12=1;
+                                13=1; 14=1; 15=1; 16=1; 96=1"))
+label(dat17$educ3.17) <- "Education"
+
+#age:
+dat17$age.17 <- NA
+dat17$age.17 <- 2017-dat17$h_birthy
+dat17$age.17[dat17$h_birthy<0] <- NA #replace all missings!
+label(dat17$age.17) <- "Age in years"
+
+#children under 16 years:
+dat17$children.17 <- case_when(dat17$h_nchresp>0 & !is.na(dat17$h_nchresp) ~ 1, 
+                              dat17$h_nchresp==0 & !is.na(dat17$h_nchresp) ~ 0)
+
+
+## 2.5. 2019 data ####
+dat19 <- read_dta("data/Stata/UKDA-6614-stata/stata/stata11_se/ukhls_w10/j_indresp.dta")
+
+dat19 %>%
+  select(pidp, j_strata, j_sex, j_birthy, j_volun, j_volfreq, j_volhrs, j_indinub_xw,
+         j_sclfsato, j_scsf1, j_nqfhigh_dv, j_qfhigh_dv, j_psu,
+         j_urban_dv,j_qfhigh, j_istrtdaty, j_istrtdatm, j_istrtdatd, j_country, j_nchresp, j_employ) -> dat19
+
+dat19$year.19 <- 2019
+dat19 <- dat19 %>%
+  mutate(doi.19=make_date(j_istrtdaty, j_istrtdatm, j_istrtdatd))
+
+dat19$month.19 <- dat19$j_istrtdatm
+dat19$month.19[dat19$month.19<0] <- NA
+table(dat19$month.19)
+
+#countries:
+dat19$j_country[dat19$j_country==-9] <- NA
+dat19$country.19 <- as.factor(dat19$j_country)
+table(dat19$country.19)        
+#1=England, 2=Wales, 3=Scotland, 4=Northern Ireland
+
+#children under 16 years:
+dat19$children.19 <- case_when(dat19$j_nchresp>0 & !is.na(dat19$j_nchresp) ~ 1, 
+                              dat19$j_nchresp==0 & !is.na(dat19$j_nchresp) ~ 0)
+
+dat19$children2019 <- dat19$children.19
+
+dat19$employed2019 <- case_when(dat19$j_employ==1 ~ 1,
+                               dat19$j_employ==2 ~ 0)
+
+dat19$psu.19 <- dat19$j_psu
+
+dat19$weights.19 <- dat19$j_indinub_xw 
+
+#drop all cases from march 2020 onwards (is already during covid-times)
+table(dat19$j_istrtdaty, dat19$j_istrtdatm, useNA = "a") #I drop 142 observations in march/april/may
+dat19 %>%
+  filter(j_istrtdaty==2018 | j_istrtdaty==2019 | (j_istrtdaty==2020 &  j_istrtdatm<3)) -> dat19
+
+#volunteer work (in last 12 months)
+dat19$volunt.19 <- factor(recode(dat19$j_volun, "-13=NA; -9=NA; -8=NA; -7=NA; 
+                                -2=NA; -1=NA; 1=1; 2=0"),
+                         labels = c("No", "Yes"))
+dat19$volunt.19[dat19$j_volhrs==0] <- "No"
+label(dat19$volunt.19) <- "Volunteered in last 4 weeks"
+
+#hours volunteered in last 4 weeks:
+dat19$volhrs.19 <- dat19$j_volhrs
+dat19$volhrs.19[dat19$volhrs.19==-7] <- NA ## proxies
+dat19$volhrs.19[dat19$volhrs.19==-8] <- 0
+dat19$volhrs.19[dat19$volhrs.19==-13] <- NA ##question not asked
+dat19$volhrs.19[dat19$volhrs.19==-2] <- NA
+dat19$volhrs.19[dat19$volhrs.19==-1] <- NA
+
+table(dat19$volunt.19, dat19$volhrs.19, useNA = "a")
+
+#main dependent variable: volunteering in last 4 weeks
+dat19 <- dat19 %>%
+  mutate(volu4weeks.19 = case_when(j_volhrs>0 ~ 1,
+                                   j_volhrs<=0 & j_volun>0 ~ 0))
+
+
+#strata:
+dat19$strata.19 <- dat19$j_strata
+dat19 = subset(dat19, select = -c(j_strata))
+
+#sex:
+dat19$female.19 <- NA
+dat19$female.19[dat19$j_sex==1] <-0
+dat19$female.19[dat19$j_sex==2] <-1
+
+dat19$female2019 <- dat19$female.19
+
+#health:
+dat19$health.19 <- factor(recode(dat19$j_scsf1, "-9=NA; -8=NA; -7=NA; -2=NA; 
+                          -1=NA; 5=0; 4=1; 3=2; 2=3; 1=4"),
+                         labels= c("Poor", "Fair", "Good", 
+                                   "Very Good", "Excellent"))
+label(dat19$health.19) <- "Health"
+dat19$health_n.19 <- as.numeric(dat19$health.19)
+dat19$health_n.19 <- dat19$health_n.19 - 1 #health numeric (0 poor -- 4 excellent)
+
+dat19$health_n2019 <- dat19$health_n.19
+#education:
+dat19$educ.19 <- factor(recode(dat19$j_qfhigh_dv, "-9=NA; -8=NA; 1=3; 2=3; 3=3; 
+                           4=3; 5=3; 6=3; 7=2; 8=2; 9=2; 10=1; 11=3; 12=3; 
+                           13=1; 14=1; 15=1; 16=1; 96=0"),
+                       labels= c("No degree", "GCSE", "A-levels", 
+                                 "Higher Education"))
+label(dat19$educ.19) <- "Highest education"
+
+dat19$educ3.19 <- factor(recode(dat19$j_qfhigh_dv, "-9=NA; -8=NA; -2=NA; -1=NA; 1=3; 2=3; 3=3;
+                                4=3; 5=3; 6=2; 7=2; 8=2; 9=2; 10=2; 11=2; 12=1;
+                                13=1; 14=1; 15=1; 16=1; 96=1"))
+label(dat19$educ3.19) <- "Education"
+
+dat19$educ2019 <- factor(recode(dat19$j_qfhigh_dv, "-9=NA; -8=NA; -2=NA; -1=NA; 1=1; 2=1; 3=1;
+                                4=1; 5=0; 6=1; 7=0; 8=0; 9=0; 10=0; 11=0; 12=0;
+                                13=0; 14=0; 15=0; 16=0; 96=0"))
+
+#age:
+dat19$age.19 <- NA
+dat19$age.19 <- 2019-dat19$j_birthy
+dat19$age.19[dat19$j_birthy<0] <- NA #replace all missings!
+label(dat19$age.19) <- "Age in years"
+
+dat19$age2019 <- case_when(dat19$age.19>=60 & !is.na(dat19$age.19) ~ 1, 
+                           dat19$age.19<60 & !is.na(dat19$age.19) ~ 0)
+
+
+save(dat19, file = "data/R/R_w2019_refsample_w10_complete.dta")
+
+
+## 2.6. 2020 data ####
+dat20 <- read_dta("data/Stata/UKDA-8644-stata_covid/stata/stata13_se/cd_indresp_w.dta")
+
+#keep relevant variables:
+dat20 %>%
+  select(pidp, psu, strata, birthy, cd_volun_cv, cd_volcause1, 
+         cd_volcause2, cd_volhrs, cd_sex_cv,
+         cd_surveystart, cd_tsvolst,
+         cd_betaindin_xw, cd_ff_country, cd_parent015) -> dat20
+
+dat20$year.20=2020
+
+#when were the interviews conducted?
+dat20$doi.20 <- as.Date(dat20$cd_surveystart)
+table(dat20$doi.20, useNA = "always") # between 24/07/2020 and 31/07/2020
+
+#countries:
+dat20$country.20 <- as.factor(dat20$cd_ff_country)
+table(dat20$country.20)        
+#1=England, 2=Wales, 3=Scotland, 4=Northern Ireland
+
+#children under 16 years:
+dat20$children.20 <- case_when(dat20$cd_parent015==1 & !is.na(dat20$cd_parent015) ~ 1, 
+                              dat20$cd_parent015==2 & !is.na(dat20$cd_parent015) ~ 0)
+
+
+dat20$psu.20 <- dat20$psu
+dat20$weights.20 <- dat20$cd_betaindin_xw
+
+dat20 = subset(dat20, select = -c(psu)) #drop old psu variable
+
+
+#volunteering in last 4 weeks:
+dat20$volunt.20 <- factor(recode(dat20$cd_volun_cv, "-9=NA; -8=NA; -2=NA; 
+                         -1=NA; 1=1; 2=0"), 
+                         labels =c("No", "Yes")) 
+dat20$volunt.20[dat20$cd_volhrs==0] <- "No"
+label(dat20$volunt.20) <- "Volunteered in last 4 weeks"
+
+#hours volunteered in last 4 weeks:
+dat20$volhrs.20 <- dat20$cd_volhrs
+dat20$volhrs.20[dat20$volhrs.20==-8] <- 0
+dat20$volhrs.20[dat20$volhrs.20==-13] <- 0
+dat20$volhrs.20[dat20$volhrs.20==-2] <- NA
+dat20$volhrs.20[dat20$volhrs.20==-1] <- NA
+dat20$volunt.20[dat20$volhrs.20==0 & dat20$volunt.20=="Yes"] <- NA #2 implausible cases
+
+#main dependent variable: volunteering in last 4 weeks
+dat20 <- dat20 %>%
+  mutate(volu4weeks.20 = case_when(cd_volhrs>0 ~ 1,
+                                cd_volhrs<=0 & cd_volun_cv>0 ~ 0))
+
+dat20$volunt2020[dat20$volhrs.20>0] <- 1
+dat20$volunt2020[dat20$volhrs.20==0] <- 0
+dat20$volunt2020[is.na(dat20$volhrs.20)] <- NA
+
+dat20 <- dat20 %>%
+  mutate(volu4m.20 = case_when(cd_volun_cv==1 ~ 1,
+                            cd_volun_cv==2 ~ 0))
+
+#volunteered for covid-related causes:
+dat20$volcovt.20 <- NA
+dat20$volcovt.20[!is.na(dat20$volunt.20) & dat20$cd_volcause1!=1 & !is.na(dat20$cd_volcause1)] <- 0
+dat20$volcovt.20[!is.na(dat20$volunt.20) & dat20$cd_volcause1==1] <- 1
+label(dat20$volcovt.20) <- "Volunteered in response to Covid (total)"
+
+table(dat20$volcovt.20, dat20$volunt.20, useNA = "always") #cross-table with missings
+
+dat20$volcovt4weeks.20 <- NA
+dat20$volcovt4weeks.20[!is.na(dat20$volunt.20) & dat20$cd_volcause1!=1 & !is.na(dat20$cd_volcause1) & dat20$cd_volhrs>0] <- 0
+dat20$volcovt4weeks.20[!is.na(dat20$volunt.20) & dat20$cd_volcause1==1] <- 1
+table(dat20$volcovt4weeks.20, dat20$volcovt.20, useNA = "a") #no difference in covid volunteering when looking at last 4 weeks or entire period!
+
+dat20$volcovv.20 <- NA
+dat20$volcovv.20[dat20$volunt.20=="Yes" & dat20$cd_volcause1!=1 & !is.na(dat20$cd_volcause1)] <- 0
+dat20$volcovv.20[dat20$volunt.20=="Yes" & dat20$cd_volcause1==1 & !is.na(dat20$volunt.20)] <- 1
+label(dat20$volcovv.20) <- "Volunteered in response to Covid (volunteers only)"
+
+table(dat20$volcovv.20, dat20$volunt.20, useNA = "always") #cross-table with missings
+table(dat20$volcovv.20, dat20$volcovt.20, useNA = "always") #cross-table with missings
+
+#volunteered for non-covid-related causes:
+dat20$volncovt.20 <- NA
+dat20$volncovt.20[!is.na(dat20$volunt.20) & dat20$cd_volcause2!=1 & !is.na(dat20$cd_volcause2)] <- 0
+dat20$volncovt.20[!is.na(dat20$volunt.20) & dat20$cd_volcause2==1] <- 1
+label(dat20$volncovt.20) <- "Volunteered non-covid related (total)"
+
+table(dat20$volncovt.20, dat20$volunt.20, useNA = "always") #cross-table with missings
+
+dat20$volncovv.20 <- NA
+dat20$volncovv.20[dat20$volunt.20=="Yes" & dat20$cd_volcause2!=1 & !is.na(dat20$cd_volcause2)] <- 0
+dat20$volncovv.20[dat20$volunt.20=="Yes" & dat20$cd_volcause2==1 & !is.na(dat20$volunt.20)] <- 1
+label(dat20$volncovv.20) <- "Volunteered non-covid related (volunteers only)"
+
+table(dat20$volncovv.20, dat20$volunt.20, useNA = "always") #cross-table with missings
+table(dat20$volncovv.20, dat20$volncovt.20, useNA = "always") #cross-table with missings
+
+
+#strata:
+dat20$strata.20 <- dat20$strata
+dat20 = subset(dat20, select = -c(strata))
+
+#age:
+dat20$age.20 <- NA
+dat20$age.20 <- 2020-dat20$birthy
+dat20$age.20[dat20$birthy<0] <- NA #replace all missings!
+label(dat20$age.20) <- "Age in years"
+
+#sex:
+dat20$female.20 <- NA
+dat20$female.20[dat20$cd_sex_cv==1] <-0
+dat20$female.20[dat20$cd_sex_cv==2] <-1
+
+
+## 2.7. 2021 data ####
+dat21  <- read_dta("data/Stata/UKDA-8644-stata_covid/stata/stata13_se/ch_indresp_w.dta")
+dat21  <- dat21  %>%
+  select(pidp, psu, strata, birthy, ch_volun_cv, ch_volcause1, ch_volcause2, ch_volhrs,
+         ch_surveystart, ch_tsvolst, ch_betaindin_xw, ch_ff_country, ch_parent015, ch_sex_cv, ch_scsf1, ch_sempderived, ch_wah)
+dat21 $year.21 = 2021
+#when interview conducted?
+dat21 $doi.21 <- as.Date(dat21 $ch_surveystart)
+table(dat21 $doi.21, useNA = "a")
+#country:
+dat21 $country.21 <- as.factor(dat21 $ch_ff_country)
+table(dat21 $country.21)
+
+#health:
+dat21 $health.21 <- factor(recode(dat21 $ch_scsf1, "-9=NA; -8=NA; -7=NA; -2=NA; 
+                          -1=NA; 5=0; 4=1; 3=2; 2=3; 1=4"),
+                         labels= c("Poor", "Fair", "Good", 
+                                   "Very Good", "Excellent"))
+label(dat21 $health.21) <- "Health"
+dat21 $health_n.21 <- as.numeric(dat21 $health.21)
+dat21 $health_n.21 <- dat21 $health_n.21 - 1 #health numeric (0 poor -- 4 excellent)
+
+
+#children under 16 years:
+dat21 $children.21 <- case_when(dat21 $ch_parent015==1 & !is.na(dat21 $ch_parent015) ~ 1, 
+                                dat21 $ch_parent015==2 & !is.na(dat21 $ch_parent015) ~ 0)
+
+
+dat21 $psu.21 <- dat21 $psu
+dat21 $weights.21 <- dat21 $ch_betaindin_xw
+
+dat21  = subset(dat21 , select = -c(psu))
+
+#employed / working from home #
+dat21 $employed2021 <- case_when(dat21 $ch_sempderived>0 & dat21 $ch_sempderived<4 ~ 1, 
+                                 dat21 $ch_sempderived==4 ~ 0)
+dat21 $wah2021 <- case_when((dat21 $ch_wah==1 | dat21 $ch_wah==2) & !is.na(dat21 $ch_wah) ~ 1,
+                          (dat21 $ch_wah==3 | dat21 $ch_wah==4) & !is.na(dat21 $ch_wah) ~ 0)
+
+#volunteering in last 4 weeks: (binary) 
+#recoding with car and hmisc-library: directly assigning labels to the factor!
+dat21 $volunt.21 <- factor(recode(dat21 $ch_volun_cv, "-9=NA; -8=NA; -2=NA; 
+                         -1=NA; 1=1; 2=0"), 
+                         labels =c("No", "Yes")) 
+dat21 $volunt.21[dat21 $ch_volhrs==0] <- "No"
+label(dat21 $volunt.21) <- "Volunteered in last 4 weeks"
+
+#hours volunteered in last 4 weeks: (continuous) (only single adjustments
+#the other values stay the same in this case)
+dat21 $volhrs.21 <- dat21 $ch_volhrs
+dat21 $volhrs.21[dat21 $volhrs.21==-8] <- 0
+dat21 $volhrs.21[dat21 $volhrs.21==-13] <- 0
+dat21 $volhrs.21[dat21 $volhrs.21==-2] <- NA
+dat21 $volhrs.21[dat21 $volhrs.21==-1] <- NA
+dat21 $volhrs.21[dat21 $volhrs.21==-9] <- NA
+dat21 $volunt.21[dat21 $volhrs.21==0 & dat21 $volunt.21=="Yes"] <- NA #2 implausible cases
+
+dat21 $volunt2021[dat21 $volhrs.21>0] <- 1
+dat21 $volunt2021[dat21 $volhrs.21==0] <- 0
+dat21 $volunt2021[is.na(dat21 $volhrs.21)] <- NA
+
+#main dependent variable: volunteering in last 4 weeks
+dat21  <- dat21  %>%
+  mutate(volu4m.21 = case_when(ch_volun_cv==1 ~ 1,
+                               ch_volun_cv==2 ~ 0))
+
+dat21  <- dat21  %>%
+  mutate(volu4weeks.21 = case_when(ch_volhrs>0 ~ 1,
+                                ch_volhrs<=0 & ch_volun_cv>0 ~ 0))
+
+
+#volunteered for covid-related causes:
+dat21 $volcovt.21 <- NA
+dat21 $volcovt.21[!is.na(dat21 $volunt.21) & dat21 $ch_volcause1!=1 & !is.na(dat21 $ch_volcause1)] <- 0
+dat21 $volcovt.21[!is.na(dat21 $volunt.21) & dat21 $ch_volcause1==1] <- 1
+label(dat21 $volcovt.21) <- "Volunteered in response to Covid (total)"
+
+table(dat21 $volcovt.21, dat21 $volunt.21, useNA = "always") #cross-table with missings
+
+dat21 $volcovt4weeks.21 <- NA
+dat21 $volcovt4weeks.21[!is.na(dat21 $volunt.21) & dat21 $ch_volcause1!=1 & !is.na(dat21 $ch_volcause1) & dat21 $ch_volhrs>0] <- 0
+dat21 $volcovt4weeks.21[!is.na(dat21 $volunt.21) & dat21 $ch_volcause1==1] <- 1
+table(dat21$volcovt4weeks.21, dat21$volcovt.21, useNA = "a") #no difference in covid volunteering when looking at last 4 weeks or entire period!
+
+dat21 $volcovv.21 <- NA
+dat21 $volcovv.21[dat21 $volunt.21=="Yes" & dat21 $ch_volcause1!=1 & !is.na(dat21 $ch_volcause1)] <- 0
+dat21 $volcovv.21[dat21 $volunt.21=="Yes" & dat21 $ch_volcause1==1 & !is.na(dat21 $volunt.21)] <- 1
+label(dat21 $volcovv.21) <- "Volunteered in response to Covid (volunteers only)"
+
+table(dat21 $volcovv.21, dat21 $volunt.21, useNA = "always") #cross-table with missings
+table(dat21 $volcovv.21, dat21 $volcovt.21, useNA = "always") #cross-table with missings
+
+#volunteered for non-covid-related causes:
+dat21 $volncovt.21 <- NA
+dat21 $volncovt.21[!is.na(dat21 $volunt.21) & dat21 $ch_volcause2!=1 & !is.na(dat21 $ch_volcause2)] <- 0
+dat21 $volncovt.21[!is.na(dat21 $volunt.21) & dat21 $ch_volcause2==1] <- 1
+label(dat21 $volncovt.21) <- "Volunteered non-covid related (total)"
+
+table(dat21 $volncovt.21, dat21 $volunt.21, useNA = "always") #cross-table with missings
+
+dat21 $volncovv.21 <- NA
+dat21 $volncovv.21[dat21 $volunt.21=="Yes" & dat21 $ch_volcause2!=1 & !is.na(dat21 $ch_volcause2)] <- 0
+dat21 $volncovv.21[dat21 $volunt.21=="Yes" & dat21 $ch_volcause2==1 & !is.na(dat21 $volunt.21)] <- 1
+label(dat21 $volncovv.21) <- "Volunteered non-covid related (volunteers only)"
+
+table(dat21 $volncovv.21, dat21 $volunt.21, useNA = "always") #cross-table with missings
+table(dat21 $volncovv.21, dat21 $volncovt.21, useNA = "always") #cross-table with missings
+
+
+#strata:
+dat21 $strata.21 <- dat21 $strata
+dat21  = subset(dat21 , select = -c(strata))
+
+#age:
+dat21 $age.21 <- NA
+dat21 $age.21 <- 2021-dat21 $birthy
+dat21 $age.21[dat21 $birthy<0] <- NA #replace all missings!
+label(dat21 $age.21) <- "Age in years"
+
+#sex:
+dat21 $female.21 <- NA
+dat21 $female.21[dat21 $ch_sex_cv==1] <-0
+dat21 $female.21[dat21 $ch_sex_cv==2] <-1
+
+
+## 2.8. Merge ####
+#dataset for transitions (and remove preliminary dataframes for more efficient performance:
+tra0 <- merge(dat21 , dat20, by="pidp", all.x = T, all.y = T)
+tra1 <- merge(tra0, dat19, by="pidp", all.x = T, all.y = T)
+tra2 <- merge(tra1, dat17, by="pidp", all.x = T, all.y = T)
+tra3 <- merge(tra2, dat15, by="pidp", all.x = T, all.y = T)
+tra4 <- merge(tra3, dat13, by="pidp", all.x = T, all.y = T)
+trap <- merge(tra4, dat11, by="pidp", all.x = T, all.y = T)
+
+#  3.   Generate combined volunteering variables over the years #####
+
+#people who volunteered at least once between 2011 and 2020
+trap$vol11_21 <- NA
+trap$vol11_21[!is.na(trap$volunt.11) | !is.na(trap$volunt.13) | 
+                !is.na(trap$volunt.15) | !is.na(trap$volunt.17) | 
+                !is.na(trap$volunt.19) | !is.na(trap$volunt.20) | !is.na(trap$volunt.21)] <- 0
+trap$vol11_21[trap$volunt.11=="Yes" | trap$volunt.13=="Yes" | 
+                trap$volunt.15=="Yes" | trap$volunt.17=="Yes" | 
+                trap$volunt.19=="Yes" | trap$volunt.20=="Yes" | trap$volunt.21=="Yes"] <- 1
+table(trap$vol11_21, useNA = "a")
+label(trap$vol11_21) <- "Valid measures/Volunteered at least once between 2011 and 2021"
+
+#people who volunteered at least once between 2011 and 2019 (experienced volunteers)
+trap$vol11_19 <- NA
+trap$vol11_19[!is.na(trap$volunt.11) | !is.na(trap$volunt.13) | 
+                !is.na(trap$volunt.15) | !is.na(trap$volunt.17) | 
+                !is.na(trap$volunt.19)] <- 0
+trap$vol11_19[trap$volunt.11=="Yes" | trap$volunt.13=="Yes" | 
+                trap$volunt.15=="Yes" | trap$volunt.17=="Yes" | 
+                trap$volunt.19=="Yes"] <- 1
+table(trap$vol11_19, useNA = "a")
+label(trap$vol11_19) <- "Valid measures/Volunteered at least once between 2011 and 2019"
+
+trap$vol20_21 <- NA
+trap$vol20_21[!is.na(trap$volunt.20) | !is.na(trap$volunt.21)] <- 0
+trap$vol20_21[trap$volunt.20=="Yes" | trap$volunt.21=="Yes"] <- 1
+table(trap$vol20_21, useNA = "a")
+label(trap$vol20_21) <- "Valid measures/Volunteered at least once between 2020 and 2021"
+
+
+trap %>%
+  filter(!is.na(vol11_21)) -> trap # keep only individuals with at least one valid value on volunteering variable
+
+# Volunteering transitions
+
+# all transition variables are conditional on being at risk to experience the respective change
+# trap <- trap %>%
+#   mutate(tsr.13 = case_when(volunt.11 == "No" & volunt.13 == "No" ~ 0,
+#                             volunt.11 == "No" & volunt.13 == "Yes" ~ 1))
+#2013: start
+trap$tsr.13 <- NA
+trap$tsr.13[trap$volunt.11=="No" & trap$volunt.13=="No"] <- 0
+trap$tsr.13[trap$volunt.11=="No" & trap$volunt.13=="Yes"] <- 1
+table(trap$tsr.13, trap$year.13, useNA = "a")
+#2013: quit
+trap$tqr.13 <- NA
+trap$tqr.13[trap$volunt.11=="Yes" & trap$volunt.13=="Yes"] <- 0
+trap$tqr.13[trap$volunt.11=="Yes" & trap$volunt.13=="No"] <- 1
+table(trap$tqr.13, trap$year.13, useNA = "a")
+
+#2015: start
+trap$tsr.15 <- NA
+trap$tsr.15[trap$volunt.13=="No" & trap$volunt.15=="No"] <- 0
+trap$tsr.15[trap$volunt.13=="No" & trap$volunt.15=="Yes"] <- 1
+table(trap$tsr.15, trap$year.15, useNA = "a")
+#2015: quit
+trap$tqr.15 <- NA
+trap$tqr.15[trap$volunt.13=="Yes" & trap$volunt.15=="Yes"] <- 0
+trap$tqr.15[trap$volunt.13=="Yes" & trap$volunt.15=="No"] <- 1
+table(trap$tqr.15, trap$year.15, useNA = "a")
+
+#2017: start
+trap$tsr.17 <- NA
+trap$tsr.17[trap$volunt.15=="No" & trap$volunt.17=="No"] <- 0
+trap$tsr.17[trap$volunt.15=="No" & trap$volunt.17=="Yes"] <- 1
+table(trap$tsr.17, trap$year.17, useNA = "a")
+#2017: quit
+trap$tqr.17 <- NA
+trap$tqr.17[trap$volunt.15=="Yes" & trap$volunt.17=="Yes"] <- 0
+trap$tqr.17[trap$volunt.15=="Yes" & trap$volunt.17=="No"] <- 1
+table(trap$tqr.17, trap$year.17, useNA = "a")
+
+#2019: start
+trap$tsr.19 <- NA
+trap$tsr.19[trap$volunt.17=="No" & trap$volunt.19=="No"] <- 0
+trap$tsr.19[trap$volunt.17=="No" & trap$volunt.19=="Yes"] <- 1
+table(trap$tsr.19, trap$year.19, useNA = "a")
+#2019: quit
+trap$tqr.19 <- NA
+trap$tqr.19[trap$volunt.17=="Yes" & trap$volunt.19=="Yes"] <- 0
+trap$tqr.19[trap$volunt.17=="Yes" & trap$volunt.19=="No"] <- 1
+table(trap$tqr.19, trap$year.19, useNA = "a")
+
+#2020: start
+trap$tsr.20 <- NA
+trap$tsr.20[trap$volunt.19=="No" & trap$volunt.20=="No"] <- 0
+trap$tsr.20[trap$volunt.19=="No" & trap$volunt.20=="Yes"] <- 1
+table(trap$tsr.20, trap$year.20, useNA = "a")
+#2020: quit
+trap$tqr.20 <- NA
+trap$tqr.20[trap$volunt.19=="Yes" & trap$volunt.20=="Yes"] <- 0
+trap$tqr.20[trap$volunt.19=="Yes" & trap$volunt.20=="No"] <- 1
+table(trap$tqr.20, trap$year.20, useNA = "a")
+
+#2021: start
+trap$tsr.21 <- NA
+trap$tsr.21[trap$volunt.20=="No" & trap$volunt.21=="No"] <- 0
+trap$tsr.21[trap$volunt.20=="No" & trap$volunt.21=="Yes"] <- 1
+table(trap$tsr.21, trap$year.21, useNA = "a")
+#2021: quit
+trap$tqr.21 <- NA
+trap$tqr.21[trap$volunt.20=="Yes" & trap$volunt.21=="Yes"] <- 0
+trap$tqr.21[trap$volunt.20=="Yes" & trap$volunt.21=="No"] <- 1
+table(trap$tqr.21, trap$year.21, useNA = "a")
+
+trap <- trap %>%
+  mutate(tq4weeks.13 = case_when(volu4weeks.11==1 & volu4weeks.13==0  ~ 1,
+                                 volu4weeks.11==1 & volu4weeks.13==1 ~ 0),
+         tq4weeks.15 = case_when(volu4weeks.13==1 & volu4weeks.15==0  ~ 1,
+                                 volu4weeks.13==1 & volu4weeks.15==1 ~ 0),
+         tq4weeks.17 = case_when(volu4weeks.15==1 & volu4weeks.17==0  ~ 1,
+                                 volu4weeks.15==1 & volu4weeks.17==1 ~ 0),
+         tq4weeks.19 = case_when(volu4weeks.17==1 & volu4weeks.19==0  ~ 1,
+                                 volu4weeks.17==1 & volu4weeks.19==1 ~ 0),
+         tq4weeks.20 = case_when(volu4weeks.19==1 & volu4weeks.20==0  ~ 1,
+                                 volu4weeks.19==1 & volu4weeks.20==1 ~ 0),
+         tq4weeks.21 = case_when(volu4weeks.20==1 & volu4weeks.21==0  ~ 1,
+                                 volu4weeks.20==1 & volu4weeks.21==1 ~ 0),
+         ts4weeks.13 = case_when(volu4weeks.11==0 & volu4weeks.13==1  ~ 1,
+                                 volu4weeks.11==0 & volu4weeks.13==0 ~ 0),
+         ts4weeks.15 = case_when(volu4weeks.13==0 & volu4weeks.15==1  ~ 1,
+                                 volu4weeks.13==0 & volu4weeks.15==0 ~ 0),
+         ts4weeks.17 = case_when(volu4weeks.15==0 & volu4weeks.17==1  ~ 1,
+                                 volu4weeks.15==0 & volu4weeks.17==0 ~ 0),
+         ts4weeks.19 = case_when(volu4weeks.17==0 & volu4weeks.19==1  ~ 1,
+                                 volu4weeks.17==0 & volu4weeks.19==0 ~ 0),
+         ts4weeks.20 = case_when(volu4weeks.19==0 & volu4weeks.20==1  ~ 1,
+                                 volu4weeks.19==0 & volu4weeks.20==0 ~ 0),
+         ts4weeks.21 = case_when(volu4weeks.20==0 & volu4weeks.21==1  ~ 1,
+                                 volu4weeks.20==0 & volu4weeks.21==0 ~ 0))
+
+#overall transition variable:
+trap$trans.11 <- 999
+trap$trans.13 <- NA
+trap$trans.13[trap$volunt.11=="No" & trap$volunt.13=="No"] <- 1 #NV->NV (stay uninvolved)
+trap$trans.13[trap$volunt.11=="Yes" & trap$volunt.13=="Yes"] <- 2 #V->V (stay involved)
+trap$trans.13[trap$volunt.11=="No" & trap$volunt.13=="Yes"] <- 3 #NV->V (start)
+trap$trans.13[trap$volunt.11=="Yes" & trap$volunt.13=="No"] <- 4 #V->NV (quit)
+trap$trans.15 <- NA
+trap$trans.15[trap$volunt.13=="No" & trap$volunt.15=="No"] <- 1 #NV->NV (stay uninvolved)
+trap$trans.15[trap$volunt.13=="Yes" & trap$volunt.15=="Yes"] <- 2 #V->V (stay involved)
+trap$trans.15[trap$volunt.13=="No" & trap$volunt.15=="Yes"] <- 3 #NV->V (start)
+trap$trans.15[trap$volunt.13=="Yes" & trap$volunt.15=="No"] <- 4 #V->NV (quit)
+trap$trans.17 <- NA
+trap$trans.17[trap$volunt.15=="No" & trap$volunt.17=="No"] <- 1 #NV->NV (stay uninvolved)
+trap$trans.17[trap$volunt.15=="Yes" & trap$volunt.17=="Yes"] <- 2 #V->V (stay involved)
+trap$trans.17[trap$volunt.15=="No" & trap$volunt.17=="Yes"] <- 3 #NV->V (start)
+trap$trans.17[trap$volunt.15=="Yes" & trap$volunt.17=="No"] <- 4 #V->NV (quit)
+trap$trans.19 <- NA
+trap$trans.19[trap$volunt.17=="No" & trap$volunt.19=="No"] <- 1 #NV->NV (stay uninvolved)
+trap$trans.19[trap$volunt.17=="Yes" & trap$volunt.19=="Yes"] <- 2 #V->V (stay involved)
+trap$trans.19[trap$volunt.17=="No" & trap$volunt.19=="Yes"] <- 3 #NV->V (start)
+trap$trans.19[trap$volunt.17=="Yes" & trap$volunt.19=="No"] <- 4 #V->NV (quit)
+trap$trans.20 <- NA
+trap$trans.20[trap$volunt.19=="No" & trap$volunt.20=="No"] <- 1 #NV->NV (stay uninvolved)
+trap$trans.20[trap$volunt.19=="Yes" & trap$volunt.20=="Yes"] <- 2 #V->V (stay involved)
+trap$trans.20[trap$volunt.19=="No" & trap$volunt.20=="Yes"] <- 3 #NV->V (start)
+trap$trans.20[trap$volunt.19=="Yes" & trap$volunt.20=="No"] <- 4 #V->NV (quit)
+trap$trans.21 <- NA
+trap$trans.21[trap$volunt.20=="No" & trap$volunt.21=="No"] <- 1 #NV->NV (stay uninvolved)
+trap$trans.21[trap$volunt.20=="Yes" & trap$volunt.21=="Yes"] <- 2 #V->V (stay involved)
+trap$trans.21[trap$volunt.20=="No" & trap$volunt.21=="Yes"] <- 3 #NV->V (start)
+trap$trans.21[trap$volunt.20=="Yes" & trap$volunt.21=="No"] <- 4 #V->NV (quit)
+
+#  4.   Reshape to long-format and define Sample ####
+#to make reshape work: proxy values for non-existent transitions to 2011
+trap$month.20 <- 7
+trap$month.21 <- 3
+trap$children.11 <- 999
+trap$tsr.11 <- 999
+trap$tqr.11 <- 999
+trap$tq4weeks.11 <- 999
+trap$ts4weeks.11 <- 999
+#substitute missing values with individual values from other waves:
+#health: (substitute only last wave)
+trap$health.20 <- NA
+trap$health.20 <-trap$health.19
+trap$health_n.20 <- NA
+trap$health_n.20 <-trap$health_n.19
+#replace individual missing values with previous values 
+trap$health_n.13[!is.na(trap$health_n.11) & is.na(trap$health_n.13)] <- trap$health_n.11[!is.na(trap$health_n.11) & is.na(trap$health_n.13)]
+trap$health_n.15[!is.na(trap$health_n.13) & is.na(trap$health_n.15)] <- trap$health_n.13[!is.na(trap$health_n.13) & is.na(trap$health_n.15)]
+trap$health_n.17[!is.na(trap$health_n.15) & is.na(trap$health_n.17)] <- trap$health_n.15[!is.na(trap$health_n.15) & is.na(trap$health_n.17)]
+trap$health_n.19[!is.na(trap$health_n.17) & is.na(trap$health_n.19)] <- trap$health_n.17[!is.na(trap$health_n.17) & is.na(trap$health_n.19)]
+trap$health_n.21[!is.na(trap$health_n.19) & is.na(trap$health_n.21)] <- trap$health_n.19[!is.na(trap$health_n.19) & is.na(trap$health_n.21)]
+
+
+#education: (substitute only last waves)
+trap$educ.20 <- NA
+trap$educ.20 <-trap$educ.19
+trap$educ.21 <-trap$educ.19
+
+
+trap$volcovt.11 <- NA #empty variables for covid volunteering in previous waves
+trap$volcovt.13 <- NA
+trap$volcovt.15 <- NA
+trap$volcovt.17 <- NA
+trap$volcovt.19 <- NA
+
+#education: substitute missing values with previous observations of the same individual
+trap$educ3.13[is.na(trap$educ3.13) & trap$educ3.11==1] <- 1
+trap$educ3.13[is.na(trap$educ3.13) & trap$educ3.11==2] <- 2
+trap$educ3.13[is.na(trap$educ3.13) & trap$educ3.11==3] <- 3
+
+trap$educ3.15[is.na(trap$educ3.15) & trap$educ3.13==1] <- 1
+trap$educ3.15[is.na(trap$educ3.15) & trap$educ3.13==2] <- 2
+trap$educ3.15[is.na(trap$educ3.15) & trap$educ3.13==3] <- 3
+
+trap$educ3.17[is.na(trap$educ3.17) & trap$educ3.15==1] <- 1
+trap$educ3.17[is.na(trap$educ3.17) & trap$educ3.15==2] <- 2
+trap$educ3.17[is.na(trap$educ3.17) & trap$educ3.15==3] <- 3
+
+trap$educ3.19[is.na(trap$educ3.19) & trap$educ3.17==1] <- 1
+trap$educ3.19[is.na(trap$educ3.19) & trap$educ3.17==2] <- 2
+trap$educ3.19[is.na(trap$educ3.19) & trap$educ3.17==3] <- 3
+
+#education: (substitute only last waves)
+trap$educ3.20 <- NA
+trap$educ3.20 <-trap$educ3.19
+trap$educ3.21 <- NA
+trap$educ3.21 <-trap$educ3.19
+
+#make gender variable time-constant:
+trap$female.13 <- ifelse(trap$female.11!=trap$female.13 & !is.na(trap$female.11) & !is.na(trap$female.13), NA, trap$female.13)
+trap$female.15 <- ifelse(trap$female.13!=trap$female.15 & !is.na(trap$female.13) & !is.na(trap$female.15), NA, trap$female.15)
+trap$female.17 <- ifelse(trap$female.15!=trap$female.17 & !is.na(trap$female.15) & !is.na(trap$female.17), NA, trap$female.17)
+trap$female.19 <- ifelse(trap$female.17!=trap$female.19 & !is.na(trap$female.17) & !is.na(trap$female.19), NA, trap$female.19)
+trap$female.20 <- ifelse(trap$female.19!=trap$female.20 & !is.na(trap$female.19) & !is.na(trap$female.20), NA, trap$female.20)
+trap$female.21 <- ifelse(trap$female.20!=trap$female.21 & !is.na(trap$female.20) & !is.na(trap$female.21), NA, trap$female.21)
+
+#number of days between last interview and current interview
+trap$difd.11 <- 9999
+trap$difd.13 <- as.numeric(difftime(trap$doi.13, trap$doi.11))
+trap$difd.15 <- as.numeric(difftime(trap$doi.15, trap$doi.13))
+trap$difd.17 <- as.numeric(difftime(trap$doi.17, trap$doi.15))
+trap$difd.19 <- as.numeric(difftime(trap$doi.19, trap$doi.17))
+trap$difd.20 <- as.numeric(difftime(trap$doi.20, trap$doi.19))
+trap$difd.21 <- as.numeric(difftime(trap$doi.21, trap$doi.20))
+
+#additional variable for volunteering in wave 19 for covid volunteering hypothesis
+trap$volunt2019 <- trap$volunt.19
+trap$volunt2019_n <- as.numeric(trap$volunt2019)
+trap$volunt2019_n <- trap$volunt2019_n-1 
+
+trap <- trap %>%
+  mutate(finsam1 = ifelse(!is.na(volhrs.19) & !is.na(volhrs.20) & !is.na(volhrs.21), 1, 0),
+         finsam2 = ifelse(!is.na(volhrs.19) & !is.na(volhrs.20), 1, 0),
+         finsam3 = ifelse(!is.na(volhrs.19) & !is.na(volhrs.21), 1, 0))
+
+
+# define samples for different steps of analysis:
+#trend_sample = all those without missings on the dependent variable, 2013-2021:
+trap$trend_sample.11 <- 0
+trap$trend_sample.13 <- 0
+trap$trend_sample.13[!is.na(trap$volu4weeks.13)] <- 1
+trap$trend_sample.15 <- 0
+trap$trend_sample.15[!is.na(trap$volu4weeks.15)] <- 1
+trap$trend_sample.17 <- 0
+trap$trend_sample.17[!is.na(trap$volu4weeks.17)] <- 1
+trap$trend_sample.19 <- 0
+trap$trend_sample.19[!is.na(trap$volu4weeks.19) & !is.na(trap$age.19) &
+                    !is.na(trap$female.19) & !is.na(trap$educ.19) &
+                    !is.na(trap$children.19) & !is.na(trap$health_n.19)] <- 1
+trap$trend_sample.20 <- 0
+trap$trend_sample.20[!is.na(trap$volu4weeks.20) & !is.na(trap$age.20) & 
+                    !is.na(trap$female.20) & !is.na(trap$educ.20) &
+                    !is.na(trap$children.20) & !is.na(trap$health_n.20)] <- 1
+trap$trend_sample.21 <- 0
+trap$trend_sample.21[!is.na(trap$volu4weeks.21) & !is.na(trap$age.21) &
+                    !is.na(trap$female.21) & !is.na(trap$educ.21) &
+                    !is.na(trap$children.21) & !is.na(trap$health_n.21)] <- 1
+
+#main_sample = all observations with valid responses on dependent variable in 2019, 2020 and 2021 (for main analysis)
+trap$main_sample.11 <- 0
+trap$main_sample.13 <- 0
+trap$main_sample.15 <- 0
+trap$main_sample.17 <- 0
+trap$main_sample.19 <- 0
+trap$main_sample.19[trap$trend_sample.19==1] <- 1
+trap$main_sample.20 <- 0
+trap$main_sample.20[trap$trend_sample.20==1] <- 1
+trap$main_sample.21 <- 0
+trap$main_sample.21[trap$trend_sample.21==1] <- 1
+
+#sample variable for those who participated in w10 and w11Cov and w12Cov: (balanced sample)
+trap$balance_sample.11 <- 0
+trap$balance_sample.13 <- 0
+trap$balance_sample.15 <- 0
+trap$balance_sample.17 <- 0
+trap$balance_sample.19 <- 0
+trap$balance_sample.19[trap$main_sample.19==1 & trap$main_sample.20==1 & trap$main_sample.21==1] <- 1
+trap$balance_sample.20 <- 0
+trap$balance_sample.20[trap$main_sample.19==1 & trap$main_sample.20==1 & trap$main_sample.21==1] <- 1
+trap$balance_sample.21 <- 0
+trap$balance_sample.21[trap$main_sample.19==1 & trap$main_sample.20==1 & trap$main_sample.21==1] <- 1
+
+
+#select relevant variables
+trap %>%
+  select(pidp, volcovt.11, volcovt.13, volcovt.15, volcovt.17, volcovt.19, 
+         volcovt.20, volcovt.21, volunt2019, vol11_19,
+         vol11_21, vol20_21, volunt2020, volunt2021,
+         female2019, health_n2019, children2019, educ2019, age2019,
+         trend_sample.11, trend_sample.13, trend_sample.15,
+         trend_sample.17, trend_sample.19, trend_sample.20, trend_sample.21,
+         main_sample.11, main_sample.13, main_sample.15,
+         main_sample.17, main_sample.19, main_sample.20, main_sample.21,
+         balance_sample.11, balance_sample.13, balance_sample.15,
+         balance_sample.17, balance_sample.19, balance_sample.20, balance_sample.21,
+         #female, femalen,
+         finsam1, finsam2, finsam3,
+         female.11, female.13, female.15,
+         female.17, female.19, female.20, female.21,
+         month.11 ,month.13, month.15,
+         month.17, month.19, month.20, month.21,
+         difd.11, difd.13, difd.15,
+         difd.17, difd.19, difd.20, difd.21,
+         doi.11, doi.13, doi.15, 
+         doi.17, doi.19, doi.20, doi.21,
+         country.11, country.13, country.15,
+         country.17, country.19, country.20, country.21,
+         educ.11, educ.13, educ.15,
+         educ.17, educ.19, educ.20, educ.21,
+         educ3.11, educ3.13, educ3.15,
+         educ3.17, educ3.19, educ3.20, educ3.21,
+         health.11, health.13, health.15, 
+         health.17, health.19, health.20, health.21,
+         health_n.11, health_n.13, health_n.15, 
+         health_n.17, health_n.19, health_n.20, health_n.21,
+         psu.11, psu.13, psu.15,
+         psu.17,psu.19, psu.20, psu.21,
+         weights.11, weights.13, weights.15, 
+         weights.17, weights.19, weights.20, weights.21,
+         year.11, year.13, year.15, 
+         year.17, year.19, year.20, year.21,
+         strata.11, strata.13, strata.15,
+         strata.17, strata.19, strata.20, strata.21,
+         age.11, age.13, age.15,
+         age.17, age.19, age.20, age.21,
+         children.11, children.13, children.15,
+         children.17, children.19, children.20, children.21, 
+         volunt.11, volunt.13, volunt.15,
+         volunt.17, volunt.19, volunt.20, volunt.21,
+         volhrs.11, volhrs.13, volhrs.15,
+         volhrs.17, volhrs.19, volhrs.20, volhrs.21,
+         tsr.11, tsr.13, tsr.15, 
+         tsr.17, tsr.19, tsr.20,  tsr.21,
+         tqr.11, tqr.13, tqr.15, 
+         tqr.17, tqr.19, tqr.20, tqr.21,
+         volu4weeks.11, volu4weeks.13, volu4weeks.15,
+         volu4weeks.17, volu4weeks.19, volu4weeks.20, volu4weeks.21,
+         tq4weeks.11, tq4weeks.13, tq4weeks.15,
+         tq4weeks.17, tq4weeks.19, tq4weeks.20, tq4weeks.21,
+         ts4weeks.11, ts4weeks.13, ts4weeks.15,
+         ts4weeks.17, ts4weeks.19, ts4weeks.20, ts4weeks.21) -> trapreshape
+
+
+# reshape:
+trapl <- reshape(trapreshape,
+                varying = c("psu.11", "psu.13", "psu.15",
+                            "psu.17","psu.19","psu.20", "psu.21",
+                            "difd.11", "difd.13", "difd.15",
+                            "difd.17", "difd.19", "difd.20", "difd.21",
+                            "month.11" ,"month.13", "month.15",
+                            "month.17", "month.19", "month.20", "month.21",
+                            "volcovt.11", "volcovt.13", "volcovt.15", 
+                            "volcovt.17", "volcovt.19", "volcovt.20", "volcovt.21",
+                            "trend_sample.11", "trend_sample.13", "trend_sample.15",
+                            "trend_sample.17", "trend_sample.19", "trend_sample.20", "trend_sample.21",
+                            "main_sample.11", "main_sample.13", "main_sample.15",
+                            "main_sample.17", "main_sample.19", "main_sample.20", "main_sample.21",
+                            "balance_sample.11", "balance_sample.13", "balance_sample.15",
+                            "balance_sample.17", "balance_sample.19", "balance_sample.20", "balance_sample.21",
+                            "weights.11", "weights.13", "weights.15", 
+                            "weights.17", "weights.19", "weights.20", "weights.21", 
+                            "year.11", "year.13", "year.15", 
+                            "year.17", "year.19", "year.20", "year.21",
+                            "female.11", "female.13", "female.15",
+                            "female.17", "female.19", "female.20", "female.21",
+                            "strata.11", "strata.13", "strata.15",
+                            "strata.17", "strata.19", "strata.20", "strata.21",
+                            "country.11", "country.13", "country.15",
+                            "country.17", "country.19", "country.20", "country.21",
+                            "educ.11", "educ.13", "educ.15",
+                            "educ.17", "educ.19", "educ.20", "educ.21",
+                            "educ3.11", "educ3.13", "educ3.15",
+                            "educ3.17", "educ3.19", "educ3.20", "educ3.21",
+                            "health.11", "health.13", "health.15", 
+                            "health.17", "health.19", "health.20", "health.21",
+                            "health_n.11", "health_n.13", "health_n.15", 
+                            "health_n.17", "health_n.19", "health_n.20", "health_n.21",
+                            "age.11", "age.13", "age.15",
+                            "age.17", "age.19", "age.20", "age.21",
+                            "children.11", "children.13", "children.15", 
+                            "children.17", "children.19", "children.20", "children.21",
+                            "volunt.11", "volunt.13", "volunt.15",
+                            "volunt.17", "volunt.19", "volunt.20", "volunt.21", 
+                            "volhrs.11", "volhrs.13", "volhrs.15",
+                            "volhrs.17", "volhrs.19", "volhrs.20", "volhrs.21",
+                            "tsr.11", "tsr.13", "tsr.15", 
+                            "tsr.17", "tsr.19", "tsr.20", "tsr.21",
+                            "tqr.11", "tqr.13", "tqr.15", 
+                            "tqr.17", "tqr.19", "tqr.20", "tqr.21",
+                            "volu4weeks.11", "volu4weeks.13", "volu4weeks.15",
+                            "volu4weeks.17", "volu4weeks.19", "volu4weeks.20", "volu4weeks.21",
+                            "tq4weeks.11", "tq4weeks.13", "tq4weeks.15",
+                            "tq4weeks.17", "tq4weeks.19", "tq4weeks.20", "tq4weeks.21",
+                            "ts4weeks.11", "ts4weeks.13", "ts4weeks.15",
+                            "ts4weeks.17", "ts4weeks.19", "ts4weeks.20", "ts4weeks.21"),
+                direction = "long",
+                timevar = "year",
+                idvar = "pidp",
+                sep = ".")
+
+trapl %>%
+  filter(!is.na(psu) & !is.na(weights)) -> trapl
+
+#factor variable for years:
+trapl$year.f <- factor(recode(trapl$year, "2011=1; 2013=2; 2015=3; 
+                              2017=4; 2019=5; 2020=6; 2021=7"),
+                          labels= c("2010-12", "2012-14", "2014-16", 
+                                    "2016-18", "2019-20", "2020", "2021"))
+#dummy variable for 2020:
+trapl$yeard <- as.factor(case_when(trapl$year==2011 | trapl$year==2013 | trapl$year==2015 | trapl$year==2017 | trapl$year==2019 ~ 0,
+                         trapl$year==2020 ~ 1, trapl$year==2021 ~ 2))
+table(trapl$year, trapl$yeard, useNA = "a")
+
+#numeric gender variable:
+trapl$female_n <- as.numeric(trapl$female)
+trapl$female_n <- trapl$female_n-1
+
+#numeric variable for volunteering:
+trapl$volunt_n <- as.numeric(trapl$volunt)
+trapl$volunt_n <- trapl$volunt_n-1 
+table(trapl$volunt_n) #dummy variable volunteering
+#only observations in 2020 need this variable for covid-wave
+trapl$volunt2019[trapl$year!=2020] <- NA
+
+
+trapl$healthd <- ifelse(trapl$health_n>2 & !is.na(trapl$health), 1, ifelse(trapl$health_n<3 , 0, NA))
+trapl$healthd2 <- ifelse(trapl$health_n>1 & !is.na(trapl$health), 1, ifelse(trapl$health_n<2 , 0, NA))
+
+
+trapl$educ2 <- as.numeric(trapl$educ)
+trapl$educ2[trapl$educ2==1] <- 2
+trapl$educ2 <- trapl$educ2-1
+trapl$educ2 <- factor(trapl$educ2, labels = c("Low", "Medium", "High"))
+
+#numeric dummy variables for all variables in sample comparison overview
+trapl$educ2_n <- NA
+trapl$educ2_n[!is.na(trapl$educ2)] <- 0
+trapl$educ2_n[trapl$educ2=="Low"] <- 1
+trapl$educ2_n[trapl$educ2=="Medium"] <- 2
+trapl$educ2_n[trapl$educ2=="High"] <- 3
+trapl$educ2_n <- as.factor(trapl$educ2_n)
+
+trapl$educ2_d1 <- NA
+trapl$educ2_d1[!is.na(trapl$educ2)] <- 0
+trapl$educ2_d1[trapl$educ2=="Low"] <- 1
+trapl$educ2_d2 <- NA
+trapl$educ2_d2[!is.na(trapl$educ2)] <- 0
+trapl$educ2_d2[trapl$educ2=="Medium"] <- 1
+trapl$educ2_d3 <- NA
+trapl$educ2_d3[!is.na(trapl$educ2)] <- 0
+trapl$educ2_d3[trapl$educ2=="High"] <- 1
+
+trapl <- trapl %>% group_by(pidp) %>% fill(female, .direction = "down") %>% ungroup()
+trapl <- trapl %>% group_by(pidp) %>% mutate(gender = lag(female))
+
+#  5.   Final data frame ####
+#main_sample = sample for main analysis (all observations in 2019, 2020, and 2021)
+#balance_sample   = balanced sample of individuals who participated in 2019, 2020, and 2021 (observations in 2019, 2020, and 2021)
+#trend_sample    = sample of all observations (all years)
+#covidsample  = sample of all observations in 2020 and 2021
+# (see above under 4.)
+
+table(trapl$main_sample, trapl$year, useNA = "a")
+table(trapl$balance_sample, trapl$year) #balanced sample
+
+trapl$covidsample <- 0
+trapl$covidsample[trapl$main_sample==1 & (trapl$year==2020 | trapl$year==2021) &
+                    !is.na(trapl$age2019) & !is.na(trapl$vol11_19) & !is.na(trapl$educ2019) & !is.na(trapl$health_n) & !is.na(trapl$children2019)] <- 1
+
+#year variable without 2011:
+trapl$yearn.f <- NA
+trapl$yearn.f[trapl$year==2013] <- 1
+trapl$yearn.f[trapl$year==2015] <- 2
+trapl$yearn.f[trapl$year==2017] <- 3
+trapl$yearn.f[trapl$year==2019] <- 4
+trapl$yearn.f[trapl$year==2020] <- 5
+trapl$yearn.f[trapl$year==2021] <- 6
+trapl$yearn.f <- as.factor(trapl$yearn.f)
+
+trapl$volcovt.20[trapl$yeard==0] <- NA #covid volunteering only in wave 11Cov!
+
+trapl$coviddummy <- case_when(trapl$year<=2019 ~ 0, trapl$year>=2020 ~1) #Dummy variable for covid yes/no
+
+table(trapl$volunt_n, useNA = "a") # how many observations with valid volunt_n values?
+
+inddf <- trapl %>% filter(!is.na(volunt_n)) %>%
+                            select(c(pidp)) 
+inddfu <- unique(inddf$pidp)
+length(inddfu) #number of individuals in for time trend
+
+trapl$educ2019_n <- as.numeric(trapl$educ2019)-1
+
+trapl$genvar <- 1 #general variable that scores 1 for all respondents (needed for figure 2 later on)
+# Apply survey design function to take sampling approach of Understanding society survey into account. 
+#employ the svydesign command to adjust for the stratified sample: (long format)
+options(survey.lonely.psu="adjust") #adjust for lonely PSUs to prevent error messages later on
+trapls<-svydesign(id=~trapl$psu, strata=~trapl$strata, 
+                  weights=~trapl$weights, nest=TRUE, 
+                  data=trapl)
+colnames(trapls) #variables in the new data frame
+
+
+#  6.   Figures ####
+## 6.1. Figure 1: Volunteering in last 4 weeks (yes/no) based on general sample #####
+
+#get legend for arranged plot:
+get_legend <- function(myggplot) {
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+
+#share of active volunteers in entire sample over time:
+meansyears1 <- svyby(~volu4weeks, ~year, design = subset(trapls, trend_sample==1), svymean, na.rm=T, ci=T, vartype = "ci")
+meansyears1 <- meansyears1 %>% 
+  mutate(vol = volu4weeks, tvol = "Any volunteering") %>%
+  select(-volu4weeks)
+meansyears2 <- svyby(~volcovt, ~year, design = subset(trapls, trend_sample==1), svymean, na.rm=T, ci=T, vartype = "ci")
+meansyears2 <- meansyears2 %>% filter(year>=2020) %>% 
+  mutate(vol = volcovt, tvol = "COVID-19 response volunteering") %>%
+  select(-volcovt)
+meansyears <- rbind(meansyears1, meansyears2)
+
+plot1_volmeans <- ggplot(meansyears, mapping = aes(x=year, y=vol, group = tvol, linetype = tvol)) +
+  geom_line(stat="identity", alpha = .6, size=1.5) +
+  geom_point(shape = 21, size=2, color="black", fill = "grey") +
+  geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width = .15) +
+  xlab("") + 
+  ylab("Share of volunteers") +
+  scale_y_continuous(labels=scales::percent_format(accuracy = 1), breaks = c(0, 0.04, 0.08, 0.12, 0.16),
+                     limits = c(0, 0.18)) +
+  scale_x_continuous(minor_breaks=c(2013:2022), breaks=c(2013, 2015, 2017, 2019, 2020, 2021), limits = c(2012.8, 2021.2)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  scale_linetype_discrete(name="") 
+plot1_volmeans
+ggsave("figures/share_of_volunteers_means.png", dpi = 600, width = 10, height = 10, units=c("cm"))
+
+plot1_volmeanslegend <- ggplot(meansyears, mapping = aes(x=year, y=vol, group = tvol, linetype = tvol)) +
+  geom_line(stat="identity", alpha = .6, size=1.5) +
+  geom_point(shape = 21, size=2, color="black", fill = "grey") +
+  geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width = .15) +
+  xlab("") + 
+  ylab("Share of Volunteeres") +
+  scale_y_continuous(labels=scales::percent_format(accuracy = 1), breaks = c(0, 0.04, 0.08, 0.12, 0.16),
+                     limits = c(0, 0.18)) +
+  scale_x_continuous(minor_breaks=c(2013:2022), breaks=c(2013, 2015, 2017, 2019, 2020, 2021), limits = c(2012.8, 2021.2)) +
+  theme_minimal() +
+  theme(legend.position = "bottom", legend.key.width = unit(2, "cm")) +
+  scale_linetype_discrete(name="") 
+plot1_legend <- get_legend(plot1_volmeanslegend)
+
+#share of quitters over time:
+quityears1 <- svyby(~tq4weeks, ~year, design = subset(trapls, trend_sample==1), svymean, na.rm=T, ci=T, vartype = "ci")
+quityears1 <- quityears1 %>% 
+  mutate(vol = tq4weeks, tvol = "Any volunteering") %>%
+  select(-tq4weeks)
+
+plot1_quitmeans <- ggplot(quityears1, mapping = aes(x=year, y=vol)) +
+  geom_line(stat="identity", alpha = .6, size=1.5) +
+  geom_point(shape = 21, size=2, color="black", fill = "grey") +
+  geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width = .15) +
+  xlab("") + 
+  ylab("Quitting volunteering") +
+  scale_y_continuous(labels=scales::percent_format(accuracy = 1), breaks = c(0.3, 0.4, 0.5, 0.6, 0.7), limits = c(0.3, 0.7)) +
+  scale_x_continuous(minor_breaks=c(2013:2022), breaks=c(2013, 2015, 2017, 2019, 2020, 2021), limits = c(2012.8, 2021.2)) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_linetype_discrete(name="") 
+plot1_quitmeans
+ggsave("figures/share_of_quitters_means.png", dpi = 600, width = 10, height = 10, units=c("cm"))
+
+#share of starters over time:
+startyears1 <- svyby(~ts4weeks, ~year, design = subset(trapls, trend_sample==1), svymean, na.rm=T, ci=T, vartype = "ci")
+startyears1 <- startyears1 %>% 
+  mutate(vol = ts4weeks, tvol = "Any volunteering") %>%
+  select(-ts4weeks)
+
+plot1_startmeans <- ggplot(startyears1, mapping = aes(x=year, y=vol)) +
+  geom_line(stat="identity", alpha = .6, size=1.5) +
+  geom_point(shape = 21, size=2, color="black", fill = "grey") +
+  geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width = .15) +
+  xlab("Year") + 
+  ylab("Starting volunteering") +
+  scale_y_continuous(labels=scales::percent_format(accuracy = 1), breaks = c(0, 0.02, 0.04, 0.06, 0.08), limits = c(0, 0.09)) +
+  scale_x_continuous(minor_breaks=c(2013:2022), breaks=c(2013, 2015, 2017, 2019, 2020, 2021), limits = c(2012.8, 2021.2)) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_linetype_discrete(name="") 
+plot1_startmeans
+ggsave("figures/share_of_starters_means.png", dpi = 600, width = 10, height = 10, units=c("cm"))
+
+#wrap the final plot:
+design_fig1_4weeks <- "A
+                B
+                C
+                D"
+fig1_4weeks <- wrap_plots(list(A = plot1_volmeans, B = plot1_quitmeans, 
+                        C = plot1_startmeans, D = plot1_legend), heights = c(0.3, 0.3, 0.3, 0.1), design = design_fig1_4weeks)
+fig1_4weeks
+ggsave("figures/fig1_4weeks.png", dpi = 600, width = 20, height = 20, units=c("cm"))
+
+## 6.2. Figure 2: Subgroup descriptives ####
+trapl <- trapl %>% filter(main_sample==1) # only 2019,2020 and 2021
+
+df0 <- as.data.frame(svyby(~volu4weeks, ~yeard, design = subset(trapls, genvar==1 & main_sample==1), svymean, na.rm=T))
+dimension <- c("overall", "overall", "overall")
+df0 <- cbind(df0, dimension)
+dffemale0 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, female==0 & main_sample==1), svymean, na.rm=T)
+dimension <- c("men", "men", "men")
+dffemale0 <- cbind(dffemale0, dimension)
+dffemale1 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, female==1 & main_sample==1), svymean, na.rm=T)
+dimension <- c("women", "women", "women")
+dffemale1 <- cbind(dffemale1, dimension)
+
+dfhealthd0 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, healthd==0 & main_sample==1), svymean, na.rm=T)
+dimension <- c("poor/fair/good health", "poor/fair/good health", "poor/fair/good health")
+dfhealthd0 <- cbind(dfhealthd0, dimension)
+dfhealthd1 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, healthd==1 & main_sample==1), svymean, na.rm=T)
+dimension <- c("very good/excellent health", "very good/excellent health", "very good/excellent health")
+dfhealthd1 <- cbind(dfhealthd1, dimension)
+
+dfuni0 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, educ2019==0 & main_sample==1), svymean, na.rm=T)
+dimension <- c("no university degree", "no university degree", "no university degree")
+dfuni0 <- cbind(dfuni0, dimension)
+dfuni1 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, educ2019==1 & main_sample==1), svymean, na.rm=T)
+dimension <- c("university degree", "university degree", "university degree")
+dfuni1 <- cbind(dfuni1, dimension)
+dfage0 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, age2019==0 & main_sample==1), svymean, na.rm=T)
+dimension <- c("<60 years", "<60 years", "<60 years")
+dfage0 <- cbind(dfage0, dimension)
+dfage1 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, age2019==1 & main_sample==1), svymean, na.rm=T)
+dimension <- c(">=60 years", ">=60 years", ">=60 years")
+dfage1 <- cbind(dfage1, dimension)
+dfch0 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, children2019==0 & main_sample==1), svymean, na.rm=T)
+dimension <- c("no children in HH", "no children in HH", "no children in HH")
+dfch0 <- cbind(dfch0, dimension)
+dfch1 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, children2019==1 & main_sample==1), svymean, na.rm=T)
+dimension <- c("children in HH", "children in HH", "children in HH")
+dfch1 <- cbind(dfch1, dimension)
+dfchf0 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, children2019==1 & female ==0 & main_sample==1), svymean, na.rm=T)
+dimension <- c("fathers", "fathers", "fathers")
+dfchf0 <- cbind(dfchf0, dimension)
+dfchf1 <- svyby(~volu4weeks, ~yeard, design = subset(trapls, children2019==1 & female ==1 & main_sample==1), svymean, na.rm=T)
+dimension <- c("mothers", "mothers", "mothers")
+dfchf1 <- cbind(dfchf1, dimension)
+
+
+plotdf <- rbind(df0, dffemale0, dffemale1, dfuni0, dfuni1, dfage0, dfage1, dfch0, dfch1, dfhealthd0, dfhealthd1) #  , dfet0, dfet1, dfet2, dfet3)
+plotdf$yeard <- as.numeric(plotdf$yeard)
+plotdf$dimension <- as.factor(plotdf$dimension)
+plotdfres <- reshape(plotdf, direction = "wide", v.names = c("volu4weeks", "se"), timevar = "yeard", idvar = "dimension")
+plotdfres$min23 <- ifelse(plotdfres$volu4weeks.2<plotdfres$volu4weeks.3, plotdfres$volu4weeks.2, plotdfres$volu4weeks.3)
+plotdfres$dimension <- fct_relevel(plotdfres$dimension, "overall", "men", "women", 
+                                   "no university degree", "university degree",
+                                   "<60 years", ">=60 years", "no children in HH", 
+                                   "children in HH", "poor/fair/good health", "very good/excellent health") 
+plotdfres$dimension <- fct_relevel(plotdfres$dimension, "very good/excellent health",
+                                   "poor/fair/good health", "children in HH",
+                                   "no children in HH", ">=60 years", "<60 years", 
+                                   "university degree", "no university degree",  "women", 
+                                   "men", "overall") 
+
+
+fig2_4weeks_plot <- ggplot(plotdfres) +
+  geom_segment(aes(x=dimension, xend=dimension, y=volu4weeks.1, yend=min23), color="grey") +
+  geom_point(aes(x=dimension, y=volu4weeks.1), shape = 15, size = 3) +
+  geom_point(aes(x=dimension, y=volu4weeks.2), shape = 19, size = 3) +
+  geom_point(aes(x=dimension, y=volu4weeks.3), shape = 17, size = 3) +
+  coord_flip() + 
+  scale_y_continuous(limits = c(0,0.22), labels=scales::percent_format(accuracy = 1)) +
+  scale_x_discrete(limits = rev(levels(dimension)))+
+  xlab("") +
+  ylab("Share of volunteers") +
+  theme_minimal()
+
+#create separate plot just for legend:
+tdf <- as.data.frame(cbind(c(1,2,3), c(4,5,6)))
+tdf$Year <- as.factor(c(2019, 2020, 2021))
+
+tdfplot <- ggplot(tdf, aes(x=V1, y=V2, group = Year)) +
+  geom_point(aes(shape= Year), size=3) +
+  scale_shape_manual(values = c(15,19,17)) +
+  theme_minimal() +
+  theme(legend.position = "bottom", legend.direction = "horizontal")
+plot2_legend <- get_legend(tdfplot)
+
+#wrap the final plot:
+design_fig2_4weeks <- "A
+                       B"
+fig2_4weeks <- wrap_plots(list(A = fig2_4weeks_plot, B = plot2_legend), heights = c(0.9, 0.1), design = design_fig2_4weeks)
+fig2_4weeks
+ggsave("figures/fig2_4weeks.png", dpi = 600, width = 20, height = 10, units=c("cm"))
+
+#  7.   Linear probability models (LPMs) (overview) #####
+
+m1 <- svyglm(volu4weeks~yeard+age2019+health_n+female+educ2019+children2019+(1|pidp), 
+                     design=subset(trapls, main_sample==1)) 
+m2 <- svyglm(volu4weeks~yeard*age2019+yeard*health_n+yeard*female+yeard*educ2019+yeard*children2019+(1|pidp), 
+                      design=subset(trapls, main_sample==1)) 
+m3 <- svyglm(tq4weeks~yeard+age2019+health_n+female+educ2019+children2019+(1|pidp), 
+                   design=subset(trapls, main_sample==1)) 
+m4 <- svyglm(tq4weeks~yeard*age2019+yeard*health_n+yeard*female+yeard*educ2019+yeard*children2019+(1|pidp), 
+                    design=subset(trapls, main_sample==1)) 
+m5 <- svyglm(ts4weeks~yeard+age2019+health_n+female+educ2019+children2019+(1|pidp), 
+                    design=subset(trapls, main_sample==1)) 
+m6 <- svyglm(ts4weeks~yeard*age2019+yeard*health_n+yeard*female+yeard*educ2019+yeard*children2019+(1|pidp), 
+                     design=subset(trapls, main_sample==1)) 
+
+stargazer(m1, m2, m3, m4, m5, m6,
+          type = "text", 
+          dep.var.caption = "Linear Probability Models",
+          dep.var.labels = c("Volunteering","Quitting", "Starting"),
+          colnames = F,
+          column.labels = c("Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"),
+          covariate.labels = c("2020", "2021", ">=60 years", "Health", "Women", "University degree", "Children", 
+                               "", "2020 X >=60 years", "2021 X >=60 years", "2020 X Health", "2021 X Health", "2020 X Women", "2021 X Women", 
+                               "2020 X University degree", "2021 X University degree", "2020 X Children", "2021 X Children", "Constant"),
+          star.cutoffs = c(0.05, 0.01, 0.001),
+          notes = "The varying number of observations across models is due to the conditional inclusion of individuals 'at risk' of experiencing a transition.",
+          notes.align = "r",
+          notes.append = T,
+          single.row = TRUE,
+          intercept.bottom = T,
+          model.numbers = F,
+          keep.stat = c("n"))
+
+m7 <- svyglm(volcovt~1, 
+                        design=subset(trapls, (year==2020) & covidsample==1))
+
+m8 <- svyglm(volcovt~age2019+female+health_n+female+educ2019+children2019, 
+                        design=subset(trapls, (year==2020) & covidsample==1))
+
+m9 <- svyglm(volcovt~age2019+female+health_n+female+educ2019+children2019+vol11_19, 
+                        design=subset(trapls, (year==2020) & covidsample==1))
+
+stargazer(m7, m8, m9,
+          type = "text", 
+          #title = "Table 5: Linear Probability Models - Covid-19 Volunteering", 
+          dep.var.caption = "Linear Probability Models - Covid-19 Volunteering",
+          dep.var.labels = "",
+          colnames = F,
+          column.labels = c("Model 7", "Model 8", "Model 9"),
+          covariate.labels = c(">=60 years", "Health", "Women", "University degree", "Children", 
+                               "Volunteered before"),
+          star.cutoffs = c(0.05, 0.01, 0.001),
+          notes = c("Standard Errors in parentheses" , "Volunteered before: Dummy variable (1 if the individual has indicated a voluntary activity in at least one wave prior to the pandemic, 0 otherwise)"),
+          notes.align = "r",
+          notes.append = T,
+          #notes.label = "",
+          single.row = TRUE,
+          intercept.bottom = T,
+          model.numbers = F,
+          keep.stat = c("n"))
+
+#  8.   Appendix ####
+## 8.1. Appendix A1: Social distancing rules during the period of observation (see paper) ####
+## 8.2. Appendix A2: Example volunteering trajectory of one individual ####
+Variable <- c("Volunteering", "Starting", "Quitting")
+W2 <- c("0", "NA", "NA")
+W4 <- c("1", "1", "NA")
+W6 <- c("1", "NA", "0")
+W8 <- c("0", "NA", "1")
+W10 <- c("1", "1", "NA")
+W11Cov <- c("0", "NA", "1")
+W12Cov <- c("0", "0", "NA")
+methodstable <- cbind(Variable, W2, W4, W6, W8, W10, W11Cov)
+methodstable
+stargazer(methodstable,
+          type="text",
+          summary=F,
+          notes = "NA=Not applicable/missing",
+          out= "tables/F_Methods_trajectoryexample")
+
+## 8.3. Appendix A3: Descriptive Statistics across waves ####
+vars <- c("volu4weeks", "tq4weeks", "ts4weeks", "age2019", "health_n", "female2019", "educ2019_n", "children")
+descriptivetable1 <- svyCreateTableOne(vars = vars, strata = "year", data = subset(trapls, main_sample==1), test = FALSE)
+descriptivetable <- print(descriptivetable1, smd=F)
+descriptivetable
+stargazer(descriptivetable, #the N in this table are not correct because they exclude those observations with zero-weight.
+          type = "text",
+          summary = F,
+          covariate.labels = c("", "W10", "W11Cov", "W12Cov"),
+          notes = c("Means for each variable per wave, standard deviations in parentheses"))
+#add correct N manually: 
+table(trapl$year, trapl$main_sample, useNA = "a")
+
+## 8.4. Appendix A4: Share of volunteers across months ####
+# I plot the share of volunteers in each month for all waves together to check whether there are seasonal differences that would usually occur regardless of covid-19.
+seasont <- svyby(~volu4weeks, ~month, design = subset(trapls, trend_sample==1 & (year==2013 | year==2015 | year==2017 | year==2019)), svymean, na.rm=T, ci=T, vartype = "ci")
+seasont
+seasont_gg <- cbind(seasont$month, seasont$volu4weeks, seasont$ci_l, seasont$ci_u)
+seasont_gg
+seasont_gg <- as.data.frame(seasont_gg) #V1=year, V2=voluntmean, V3=lower CI, V4=upper CI
+seasont_gg
+ggplot(seasont_gg, mapping = aes(x=V1, y=V2)) +
+  geom_line(stat="identity", alpha = .6, size=1) +
+  geom_errorbar(aes(ymin=V3, ymax=V4), width = .1) +
+  xlab("Month") + ylab("Percentage of volunteers") +
+  scale_y_continuous(labels=scales::percent, limits=c(0,0.2)) +
+  scale_x_continuous(breaks=c(1,2,3,4,5,6,7,8,9,10,11,12)) +
+  theme(legend.position = "bottom") +
+  theme_minimal() +
+  theme(text = element_text(size=20))
+ggsave("figures/F_Appendix4_Seasonality.png", dpi = 600, width = 20, height = 10, units=c("cm"))
+
+length(subset(trapl$volu4weeks, trapl$year<2020 & trapl$year>2011)) #number of observation for months graph (only pre-covid observations)
+
+## 8.5. Appendix A5: Attrition and volunteering ####
+
+continuers10 <- svymean(~volu4weeks, design=subset(trapls, main_sample==1 & balance_sample==1 & year==2019))
+continuers11 <- svymean(~volu4weeks, design=subset(trapls, main_sample==1 & balance_sample==1 & year==2020))
+continuers12 <- svymean(~volu4weeks, design=subset(trapls, main_sample==1 & balance_sample==1 & year==2021))
+noncontinuers10 <- svymean(~volu4weeks, design=subset(trapls, main_sample==1 & balance_sample==0 & year==2019))
+continuers10 <- as.data.frame(continuers10)
+continuers11 <- as.data.frame(continuers11)
+continuers12 <- as.data.frame(continuers12)
+noncontinuers10 <- as.data.frame(noncontinuers10)
+
+balance_sampletable <- table(trapl$balance_sample, trapl$year)
+main_sampletableprep <- trapl %>% filter(!is.na(volu4weeks) & !is.na(educ2019) & !is.na(female2019) & !is.na(age2019) & !is.na(health_n) & !is.na(children2019) & !is.na(year)) 
+main_sampletable <- table(main_sampletableprep$main_sample, main_sampletableprep$year)
+
+table4 <- as.data.frame(cbind(c(round2(continuers10[1,1], digits=3)*100, balance_sampletable[2,1], round2(noncontinuers10[1,1], digits = 3)*100, balance_sampletable[1,1]), 
+                              c(round2(continuers11[1,1], digits = 3)*100, balance_sampletable[2,2], "NA", "NA"),
+                              c(round2(continuers12[1,1], digits = 3)*100, balance_sampletable[2,3], "NA", "NA")))
+colnames(table4) <- c("wave 10", "wave 11Cov", "wave 12Cov")
+rownames(table4) <- c("Respondents in 11Cov and 12Cov (% volunteers)", "Respondents in 11Cov and 12Cov (N)", "Non-respondents in 11Cov or 12Cov (% volunteers)", "Non-respondents in 11Cov or 12Cov (N)")
+stargazer(table4,
+          type="text",
+          summary=F,
+          notes.align = "r")
+
+## 8.6. Appendix A6: Analysis based on balanced sample ####
+#balanced sample (b), i.e. only individuals who participated in the survey in all relevant years:
+b1 <- svyglm(volu4weeks~yeard+age2019+health_n+female+educ2019+children2019+(1|pidp), 
+                   design=subset(trapls, balance_sample==1)) 
+b2 <- svyglm(volu4weeks~yeard*age2019+yeard*health_n+yeard*female+yeard*educ2019+yeard*children2019+(1|pidp), 
+                    design=subset(trapls, balance_sample==1)) 
+b3 <- svyglm(tq4weeks~yeard+age2019+health_n+female+educ2019+children2019+(1|pidp), 
+                 design=subset(trapls, balance_sample==1)) 
+b4 <- svyglm(tq4weeks~yeard*age2019+yeard*health_n+yeard*female+yeard*educ2019+yeard*children2019+(1|pidp), 
+                  design=subset(trapls, balance_sample==1)) 
+b5 <- svyglm(ts4weeks~yeard+age2019+health_n+female+educ2019+children2019+(1|pidp), 
+                  design=subset(trapls, balance_sample==1)) 
+b6 <- svyglm(ts4weeks~yeard*age2019+yeard*health_n+yeard*female+yeard*educ2019+yeard*children2019+(1|pidp), 
+                   design=subset(trapls, balance_sample==1)) 
+stargazer(b1, b2, b3, b4, b5, b6, type = "text")
+
+stargazer(b1, b2, b3, b4, b5, b6,
+          type = "text", 
+          dep.var.caption = "Linear Probability Models",
+          dep.var.labels = c("Volunteering","Quitting", "Starting"),
+          colnames = F,
+          column.labels = c("Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"),
+          covariate.labels = c("2020", "2021", ">=60 years", "Health", "Women", "University degree", "Children", 
+                               "", "2020 X >=60 years", "2021 X >=60 years", "2020 X Health", "2021 X Health", "2020 X Women", "2021 X Women", 
+                               "2020 X University degree", "2021 X University degree", "2020 X Children", "2021 X Children", "Constant"),
+          star.cutoffs = c(0.05, 0.01, 0.001),
+          notes = c("The varying number of observations across models is due to the conditional inclusion of individuals 'at risk' of experiencing a transition.", "Note: varying sample sizes because of ???at risk???, subjective health was measured on a five point scale: ???In general, would you say your health is ?????? (Poor [coded 0], Fair [1], Good [2], Very good [3], Excellent? [4]), values from 2019 were carried on to wave 11Cov, which did not include the question on subjective health.", "Standard Errors in parentheses."),
+          notes.align = "r",
+          notes.append = T,
+          single.row = TRUE,
+          intercept.bottom = T,
+          model.numbers = F,
+          keep.stat = c("n"))
+
+#  9    Additional Analyses ####
+## 9.1. Covid volunteering in 2021 ####
+cov21_1 <- svyglm(volcovt~1, 
+                        design=subset(trapls, (year==2021) & covidsample==1))
+
+cov21_2 <- svyglm(volcovt~age2019+female+health_n+female+educ2019+children2019, 
+                        design=subset(trapls, (year==2021) & covidsample==1))
+
+cov21_3 <- svyglm(volcovt~age2019+female+health_n+female+educ2019+children2019+vol11_19, 
+                        design=subset(trapls, (year==2021) & covidsample==1))
+
+stargazer(cov21_1, cov21_2, cov21_3, type = "text")
+
+## 9.2. Analyses with full time period outcome ####
+#Here, I use the variable "volunteered in the last 12 / 4 months" (4 months in 2020, 12 months in all other waves) instead of the variables "volunteered in the last 4 weeks"
+# the results are very similar: fulltime period (f):
+f1 <- svyglm(volunt_n~yeard+age2019+health_n+female+educ2019+children2019+(1|pidp), 
+                  design=subset(trapls, main_sample==1)) 
+f2 <- svyglm(volunt_n~yeard*age2019+yeard*health_n+yeard*female+yeard*educ2019+yeard*children2019+(1|pidp), 
+                   design=subset(trapls, main_sample==1))
+f3 <- svyglm(tqr~yeard+age2019+health_n+female+educ2019+children2019+(1|pidp), 
+                design=subset(trapls, main_sample==1)) 
+f4 <- svyglm(tqr~yeard*age2019+yeard*health_n+yeard*female+yeard*educ2019+yeard*children2019+(1|pidp), 
+                 design=subset(trapls, main_sample==1)) 
+f5 <- svyglm(tsr~yeard+age2019+health_n+female+educ2019+children2019+(1|pidp), 
+                 design=subset(trapls, main_sample==1))
+f6 <- svyglm(tsr~yeard*age2019+yeard*health_n+yeard*female+yeard*educ2019+yeard*children2019+(1|pidp), 
+                  design=subset(trapls, main_sample==1)) 
+
+
+stargazer(f1, f2, f3, f4, f5, f6,
+          type = "text", 
+          dep.var.caption = "Linear Probability Models",
+          dep.var.labels = c("Volunteering","Quitting", "Starting"),
+          colnames = F,
+          column.labels = c("Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"),
+          covariate.labels = c("2020", "2021", ">=60 years", "Health", "Women", "University degree", "Children", 
+                               "", "2020 X >=60 years", "2021 X >=60 years", "2020 X Health", "2021 X Health", "2020 X Women", "2021 X Women", 
+                               "2020 X University degree", "2021 X University degree", "2020 X Children", "2021 X Children", "Constant"),
+          #table.placement= "H", order = c(1,2,3,4,5,6,7,9,10,11,12,13,14,15,8),
+          star.cutoffs = c(0.05, 0.01, 0.001),
+          notes = c("The varying number of observations across models is due to the conditional inclusion of individuals 'at risk' of experiencing a transition.", "Note: varying sample sizes because of ???at risk???, subjective health was measured on a five point scale: ???In general, would you say your health is ?????? (Poor [coded 0], Fair [1], Good [2], Very good [3], Excellent? [4]), values from 2019 were carried on to wave 11Cov, which did not include the question on subjective health.", "Standard Errors in parentheses."),
+          notes.align = "r",
+          notes.append = T,
+          #notes.label = "Note: Standard Errors in parentheses, Maximum Likelihood Estimation to handle survey structure, Significance levels:",
+          single.row = TRUE,
+          intercept.bottom = T,
+          model.numbers = F,
+          keep.stat = c("n"))
+
+#  10.  End #####
+
+sink()
+
